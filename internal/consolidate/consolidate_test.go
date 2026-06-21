@@ -1,0 +1,115 @@
+package consolidate
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestParseDayOutput(t *testing.T) {
+	out := `GIST: Alice planned a trip and set a reminder.
+SUMMARY:
+- Alice is going to Tokyo in July.
+- Set a reminder to book flights.
+USER_NOTES:
+5: Prefers window seats.
+9: none-of-this-parses
+none`
+	gist, body, notes := parseDayOutput(out)
+	if gist != "Alice planned a trip and set a reminder." {
+		t.Fatalf("gist = %q", gist)
+	}
+	if !strings.Contains(body, "Tokyo") || strings.Contains(body, "USER_NOTES") {
+		t.Fatalf("body wrong: %q", body)
+	}
+	if notes[5] != "Prefers window seats." {
+		t.Fatalf("user note 5 = %q", notes[5])
+	}
+	if _, ok := notes[9]; !ok {
+		t.Fatalf("expected a note for uid 9")
+	}
+}
+
+func TestParseDayOutputDegraded(t *testing.T) {
+	// No markers at all — gist is the first line, body is the whole thing.
+	gist, body, notes := parseDayOutput("just a blob\nof text")
+	if gist != "just a blob" || !strings.Contains(body, "blob") {
+		t.Fatalf("degraded parse wrong: gist=%q body=%q", gist, body)
+	}
+	if len(notes) != 0 {
+		t.Fatalf("expected no notes, got %v", notes)
+	}
+}
+
+// --- orchestrator with fakes ---
+
+type fakeMem struct {
+	pending  []string
+	aged     []string
+	dayFiles map[string]string
+	written  map[string]string // day -> body
+	gists    map[string]string
+	userNote map[int64]string
+	longTerm []string
+	deleted  []string
+}
+
+func (f *fakeMem) PendingRawDays() []string                 { return f.pending }
+func (f *fakeMem) RawTranscript(day string) (string, error) { return "transcript for " + day, nil }
+func (f *fakeMem) WriteDayFile(day, gist, body string) error {
+	f.written[day] = body
+	f.gists[day] = gist
+	return nil
+}
+func (f *fakeMem) AppendUserNote(uid int64, note string) error { f.userNote[uid] = note; return nil }
+func (f *fakeMem) AgedDayFiles(int, time.Time) []string        { return f.aged }
+func (f *fakeMem) ReadDayFile(day string) (string, error)      { return f.dayFiles[day], nil }
+func (f *fakeMem) AppendLongTerm(text string) error {
+	f.longTerm = append(f.longTerm, text)
+	return nil
+}
+func (f *fakeMem) DeleteDayFile(day string) error { f.deleted = append(f.deleted, day); return nil }
+
+type fakeSum struct{ reply func(string) string }
+
+func (f fakeSum) Summarize(_ context.Context, instr string) (string, error) {
+	return f.reply(instr), nil
+}
+
+func TestRunEpisodicAndAgeOut(t *testing.T) {
+	mem := &fakeMem{
+		pending:  []string{"01-06-26"},
+		aged:     []string{"01-01-26", "02-01-26"},
+		dayFiles: map[string]string{"01-01-26": "old note A", "02-01-26": "old note B"},
+		written:  map[string]string{}, gists: map[string]string{}, userNote: map[int64]string{},
+	}
+	sum := fakeSum{reply: func(instr string) string {
+		if strings.Contains(instr, "Consolidate one day") {
+			return "GIST: a day\nSUMMARY:\nstuff happened\nUSER_NOTES:\n7: likes tea"
+		}
+		// age-out: durable for A, "none" for B
+		if strings.Contains(instr, "old note A") {
+			return "- A is durable"
+		}
+		return "none"
+	}}
+
+	if err := Run(context.Background(), mem, sum, 14, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	if mem.written["01-06-26"] != "stuff happened" || mem.gists["01-06-26"] != "a day" {
+		t.Fatalf("episodic write wrong: %+v / %+v", mem.written, mem.gists)
+	}
+	if mem.userNote[7] != "likes tea" {
+		t.Fatalf("user note wrong: %v", mem.userNote)
+	}
+	// Only A produced a durable fact; both day files are deleted after age-out.
+	if len(mem.longTerm) != 1 || !strings.Contains(mem.longTerm[0], "A is durable") {
+		t.Fatalf("long-term wrong: %v", mem.longTerm)
+	}
+	if len(mem.deleted) != 2 {
+		t.Fatalf("both aged notes should be deleted, got %v", mem.deleted)
+	}
+}
