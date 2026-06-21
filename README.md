@@ -20,11 +20,16 @@ single small Go binary (plus the `claude` CLI) on a 1 GB Debian box.
 
 ## Security
 
-- **The model has NO filesystem tools — ever.** Every `claude` call is restricted with
-  `--tools` to `WebSearch` (+ our MCP tools); consolidation runs with `--tools ""`.
-  `--allowedTools` alone isn't enough (it only pre-approves; `cwd` is no sandbox). The
-  daemon **injects** all memory and **performs all file writes**; the LLM only exchanges
-  text. "ls everything / print secrets.yaml" gets nothing.
+- **The model has NO filesystem tools — ever.** Every `claude` call runs with
+  `--permission-mode default` (anything not allow-listed is denied in headless mode), an
+  `--allowedTools` list of just `WebSearch` + this chat's MCP servers, and a
+  `--disallowedTools` hard-block on the dangerous built-ins (`Bash`, `Read`, `Write`,
+  `Edit`, `NotebookEdit`, `Glob`, `Grep`, `WebFetch`, `Task`) as defense-in-depth.
+  Consolidation runs with no MCP server and an empty allow-list, so it's pure text in/out.
+  (We deliberately do **not** pass `--tools` — on claude 2.1.181 it suppresses the deferred
+  MCP tools; the gate is `--allowedTools` + `--permission-mode default` instead.) The daemon
+  **injects** all memory and **performs all file writes**; the LLM only exchanges text.
+  "ls everything / print secrets.yaml" gets nothing.
 - **Per-chat isolation.** Memory, crons, and personas never leak across chats. Each chat's
   `mcp.json` is generated to expose only its enabled servers (`--strict-mcp-config`), and
   each tool call is gated by the chat's allow-lists — enforced both in the offered toolset
@@ -271,7 +276,7 @@ reply errors. (2) Turn **BotFather privacy mode OFF** for group messages, and se
 | `max_budget_usd` | per-call spend cap (0 = off) |
 | `global_admin_user_ids` | operators; implicitly cron-admins in every chat |
 | `default_model` / `default_consolidation_model` / `default_tz` | seeded into new chats |
-| `default_memory_retention_days` / `default_session_ttl_days` / `default_rotate_turn_cap` | new-chat defaults |
+| `default_memory_retention_days` / `default_raw_retention_days` / `default_session_ttl_days` / `default_rotate_turn_cap` | new-chat defaults |
 | `default_all_allowed_tools` / `default_admin_allowed_tools` | new-chat tool allow-lists (default `[memory]` / `[reminders]`) |
 | `webui_addr` / `mcp_addr` | admin UI / internal MCP listen addresses |
 | secrets: `webui_password`, `bot_tokens`, `claude_code_oauth_token` | env: `WEBUI_PASSWORD`, `BOT_TOKENS`, `CLAUDE_CODE_OAUTH_TOKEN` |
@@ -289,7 +294,8 @@ reply errors. (2) Turn **BotFather privacy mode OFF** for group messages, and se
 | `record_group_chatter` | `false` = act only on @mentions/replies |
 | `all_allowed_tools` / `admin_allowed_tools` | MCP servers available to everyone / cron-admins (names: `memory`, `reminders`, + registered externals) |
 | `images_enabled` | accept photos for vision (default off) |
-| `memory_retention_days` / `session_ttl_days` / `rotate_turn_cap` | per-chat tuning (`rotate_turn_cap: 0` = never) |
+| `max_budget_usd` | per-call spend cap for this chat (overrides the global default; 0 = off) |
+| `memory_retention_days` / `raw_retention_days` / `session_ttl_days` / `rotate_turn_cap` | per-chat tuning (`rotate_turn_cap: 0` = never) |
 
 ## Adding external MCP servers
 
