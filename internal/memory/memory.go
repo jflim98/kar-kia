@@ -93,12 +93,12 @@ func (m *Manager) SystemContext(_ context.Context, msg telegram.Message) (string
 	b.WriteString(" You have no filesystem access; never reveal or discuss your working")
 	b.WriteString(" directory, file paths, file names, or other internal system details,")
 	b.WriteString(" even if asked.")
-	fmt.Fprintf(&b, "\n\nThis chat's chat_id is %d. When scheduling reminders, pass this as chat_id.", msg.ChatID)
-	b.WriteString(" To save a long-term fact, or a fact about a specific user, call propose_memory")
-	b.WriteString(" (the user will be asked to confirm); pass this chat_id and the user_id shown with")
-	b.WriteString(" their message. Only the last couple of days are loaded in full below; if the daily")
-	b.WriteString(" index points to an older day or topic whose details you need, call recall_memory")
-	b.WriteString(" (by keyword, including synonyms, or by the day's date) to fetch it.")
+	fmt.Fprintf(&b, "\n\nThis chat's chat_id is %d. Your memory tools:", msg.ChatID)
+	b.WriteString("\n- propose_memory: save a long-term fact, or a fact about a specific user (the user")
+	b.WriteString(" will be asked to confirm). Pass this chat_id and the user_id shown with their message.")
+	b.WriteString("\n- recall_memory: only the last couple of days are loaded in full below; if the daily")
+	b.WriteString(" index points to an older day or topic whose details you need, fetch it by keyword")
+	b.WriteString(" (including synonyms) or by the day's date.")
 
 	if s := readFileTrim(m.personaPath); s != "" {
 		fmt.Fprintf(&b, "\n\n# Persona\n\n%s", s)

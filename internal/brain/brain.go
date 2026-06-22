@@ -5,7 +5,9 @@ package brain
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -197,6 +199,12 @@ func (b *Brain) composeTurn(msg telegram.Message, chat config.Chat, isAdmin bool
 		return body
 	}
 	parts := []string{line, b.toolsLine(chat, isAdmin)}
+	// Reminder guidance is admin-only and rides here (never the cached system prompt), gated by the
+	// SAME source as the tool allow-list so a non-admin is never told reminders exist or how to use
+	// them. Only surface it when reminders is actually enabled for this speaker.
+	if b.runner.mcpConfig != "" && slices.Contains(chat.ServersFor(isAdmin), config.ServerReminders) {
+		parts = append(parts, fmt.Sprintf("When scheduling reminders, pass chat_id %d.", msg.ChatID))
+	}
 	if prof := b.mem.UserProfile(msg); prof != "" {
 		parts = append(parts, prof)
 	}

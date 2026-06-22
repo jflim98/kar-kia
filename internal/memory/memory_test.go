@@ -197,6 +197,11 @@ func TestSystemContextStableAcrossSpeakers(t *testing.T) {
 			t.Fatalf("per-speaker data leaked into the cached system prompt: %q", leak)
 		}
 	}
+	// Reminders are admin-only: the static, speaker-independent prompt must not mention them
+	// (that guidance rides in the admin-gated user turn instead).
+	if strings.Contains(strings.ToLower(sysA), "reminder") {
+		t.Fatalf("reminder guidance must not be in the static system prompt:\n%s", sysA)
+	}
 
 	// The per-speaker pieces carry identity (line) and profile, and are empty for non-user turns.
 	if line := m.SpeakerLine(a); !strings.Contains(line, "@al") || !strings.Contains(line, "user_id 7") {

@@ -144,10 +144,17 @@ func TestComposeTurnOrderingAndToolsLine(t *testing.T) {
 	if strings.Contains(out, "reminders") {
 		t.Fatalf("non-admin must not be told about reminders:\n%s", out)
 	}
+	if strings.Contains(out, "scheduling reminders") {
+		t.Fatalf("non-admin must not get the reminder scheduling hint:\n%s", out)
+	}
 
-	// Admin: reminders appears with its description.
-	if admin := b.composeTurn(speaker, chat, true, "BODY"); !strings.Contains(admin, "reminders (schedule, list, and cancel reminders)") {
+	// Admin: reminders appears with its description, plus the chat_id scheduling hint.
+	admin := b.composeTurn(speaker, chat, true, "BODY")
+	if !strings.Contains(admin, "reminders (schedule, list, and cancel reminders)") {
 		t.Fatalf("admin should see reminders:\n%s", admin)
+	}
+	if !strings.Contains(admin, "When scheduling reminders, pass chat_id") {
+		t.Fatalf("admin should get the reminder scheduling hint:\n%s", admin)
 	}
 
 	// No speaker (scheduled reminder): body only, no header.
