@@ -77,4 +77,20 @@ func TestParseMessageCapturesRepliedContent(t *testing.T) {
 	if pm := parseMessage(photoReply, botID, "assistant_bot"); pm.ReplyToText != "our new logo" {
 		t.Fatalf("caption of replied-to photo not captured: %q", pm.ReplyToText)
 	}
+
+	// The replied-to photo's file_id (largest) is captured so the dispatcher can attach it.
+	imgReply := &models.Message{
+		ID: 22, Chat: models.Chat{ID: -100, Type: models.ChatTypeSupergroup}, From: &models.User{ID: 7},
+		Text: "@assistant_bot what is this",
+		Entities: []models.MessageEntity{
+			{Type: models.MessageEntityTypeMention, Offset: 0, Length: len("@assistant_bot")},
+		},
+		ReplyToMessage: &models.Message{
+			ID: 17, From: &models.User{ID: 8},
+			Photo: []models.PhotoSize{{FileID: "small"}, {FileID: "large"}},
+		},
+	}
+	if pm := parseMessage(imgReply, botID, "assistant_bot"); pm.ReplyToPhotoFileID != "large" {
+		t.Fatalf("largest replied-to photo file_id not captured: %q", pm.ReplyToPhotoFileID)
+	}
 }

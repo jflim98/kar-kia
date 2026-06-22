@@ -36,6 +36,10 @@ type Message struct {
 	// and sender, so the bot can see the quoted context (e.g. "@bot summarize ⤷ <A>").
 	ReplyToText string
 	ReplyToUser string
+
+	// ReplyToPhotoFileID is the largest photo on the message being replied to, if any. It lets
+	// "@bot what's this?" in reply to an earlier image attach that image for vision.
+	ReplyToPhotoFileID string
 }
 
 // HasPhoto reports whether the message carried a photo.
@@ -78,6 +82,9 @@ func parseMessage(msg *models.Message, botID int64, botUsername string) Message 
 		}
 		out.ReplyToText = rtext
 		out.ReplyToUser = displayName(r.From)
+		if n := len(r.Photo); n > 0 {
+			out.ReplyToPhotoFileID = r.Photo[n-1].FileID // last = largest
+		}
 		if r.From != nil && r.From.ID == botID {
 			out.RepliesToBot = true
 		}

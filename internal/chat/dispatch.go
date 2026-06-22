@@ -44,10 +44,16 @@ func (m *Manager) OnMessage(ctx context.Context, s telegram.Sender, token string
 		return
 	}
 
-	// Photos: download + attach for vision only when this chat enables images.
-	if msg.HasPhoto() {
+	// Photos: download + attach for vision only when this chat enables images. A photo on
+	// the current message wins; otherwise fall back to one on the message being replied to,
+	// so "@bot what's this?" in reply to an earlier image can see it.
+	photoFileID := msg.PhotoFileID
+	if photoFileID == "" {
+		photoFileID = msg.ReplyToPhotoFileID
+	}
+	if photoFileID != "" {
 		if t.cfg.ImagesEnabled {
-			if data, media, err := s.DownloadFile(ctx, token, msg.PhotoFileID); err == nil {
+			if data, media, err := s.DownloadFile(ctx, token, photoFileID); err == nil {
 				msg.ImageB64 = base64.StdEncoding.EncodeToString(data)
 				msg.ImageMedia = media
 			} else {
