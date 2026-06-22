@@ -112,6 +112,35 @@ func (m *Manager) AgedDayFiles(retentionDays int, now time.Time) []string {
 	return days
 }
 
+// PruneRawLogs deletes raw daily logs older than retentionDays, never touching today's
+// (still being written). Consolidation compacts every pending raw day into a dated note
+// before this runs (see consolidate.Run), so an aged-out raw log has already been summarized.
+// Returns the count removed.
+func (m *Manager) PruneRawLogs(retentionDays int, now time.Time) (int, error) {
+	files, _ := filepath.Glob(m.path("daily_memory", "_raw", "*.jsonl"))
+	cutoff := now.AddDate(0, 0, -retentionDays)
+	today := dayStamp(now)
+
+	var removed int
+	for _, p := range files {
+		day := strings.TrimSuffix(filepath.Base(p), ".jsonl")
+		if day == today {
+			continue
+		}
+		t, err := time.ParseInLocation("02-01-06", day, now.Location())
+		if err != nil {
+			continue
+		}
+		if t.Before(cutoff) {
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				return removed, err
+			}
+			removed++
+		}
+	}
+	return removed, nil
+}
+
 // ReadDayFile returns a compacted daily note's contents.
 func (m *Manager) ReadDayFile(day string) (string, error) {
 	b, err := os.ReadFile(m.path("daily_memory", day+".md"))

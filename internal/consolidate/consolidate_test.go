@@ -53,6 +53,7 @@ type fakeMem struct {
 	userNote map[int64]string
 	longTerm []string
 	deleted  []string
+	rawArg   int // retentionDays passed to PruneRawLogs
 }
 
 func (f *fakeMem) PendingRawDays() []string                 { return f.pending }
@@ -70,6 +71,10 @@ func (f *fakeMem) AppendLongTerm(text string) error {
 	return nil
 }
 func (f *fakeMem) DeleteDayFile(day string) error { f.deleted = append(f.deleted, day); return nil }
+func (f *fakeMem) PruneRawLogs(retentionDays int, _ time.Time) (int, error) {
+	f.rawArg = retentionDays
+	return 0, nil
+}
 
 type fakeSum struct{ reply func(string) string }
 
@@ -95,8 +100,11 @@ func TestRunEpisodicAndAgeOut(t *testing.T) {
 		return "none"
 	}}
 
-	if err := Run(context.Background(), mem, sum, 14, time.Now()); err != nil {
+	if err := Run(context.Background(), mem, sum, 14, 30, time.Now()); err != nil {
 		t.Fatal(err)
+	}
+	if mem.rawArg != 30 {
+		t.Fatalf("PruneRawLogs should get rawRetentionDays=30, got %d", mem.rawArg)
 	}
 
 	if mem.written["01-06-26"] != "stuff happened" || mem.gists["01-06-26"] != "a day" {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"assistant/internal/telegram"
 )
@@ -164,6 +165,72 @@ func TestSystemContextIncludesPersona(t *testing.T) {
 	}
 	if ver == 0 {
 		t.Fatal("expected non-zero memory version")
+	}
+}
+
+func TestPruneRawLogs(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")
+	now := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
+
+	raw := func(day string) string { return filepath.Join("daily_memory", "_raw", day+".jsonl") }
+	today := "23-06-26"
+	recent := "18-06-26" // 5 days ago, within the 14-day window
+	old := "03-06-26"    // 20 days ago, beyond the window
+	for _, day := range []string{today, recent, old} {
+		writeMem(t, dir, raw(day), "{}\n")
+	}
+
+	n, err := m.PruneRawLogs(14, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 raw log pruned, got %d", n)
+	}
+	if _, err := os.Stat(filepath.Join(dir, raw(old))); !os.IsNotExist(err) {
+		t.Fatal("old raw log should be deleted")
+	}
+	for _, day := range []string{today, recent} {
+		if _, err := os.Stat(filepath.Join(dir, raw(day))); err != nil {
+			t.Fatalf("%s raw log should be kept: %v", day, err)
+		}
+	}
+}
+
+func TestVersionRotation(t *testing.T) {
+	dir := t.TempDir()
+	personaPath := filepath.Join(dir, "persona.md")
+	m := New(dir, personaPath, "UTC")
+	ver := func() int {
+		_, v, err := m.SystemContext(context.Background(), telegram.Message{ChatID: 1, UserID: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	writeMem(t, dir, "persona.md", "I am Nova.")
+	base := ver()
+
+	// A no-op rewrite with identical content must NOT rotate (the reported config-save bug:
+	// the web UI re-saves the same persona, which used to bump mtime and drop the session).
+	writeMem(t, dir, "persona.md", "I am Nova.")
+	if got := ver(); got != base {
+		t.Fatalf("identical persona rewrite must not change version: base=%d got=%d", base, got)
+	}
+
+	// Appending to long-term memory must NOT rotate: the fact is already in the live
+	// conversation; the next session picks up long_term_memory.md naturally.
+	writeMem(t, dir, "long_term_memory.md", "- (2026-06-23) The user prefers terse replies.")
+	if got := ver(); got != base {
+		t.Fatalf("long-term memory append must not change version: base=%d got=%d", base, got)
+	}
+
+	// A genuine persona edit MUST rotate so the new behavior takes effect.
+	writeMem(t, dir, "persona.md", "I am Nova, a terse assistant.")
+	if got := ver(); got == base {
+		t.Fatal("persona content change must change version")
 	}
 }
 

@@ -171,7 +171,7 @@ func (m *Manager) activate(id int64, cfg config.Chat) error {
 	sched.Start(tctx)
 	// Per-chat nightly jobs.
 	_ = sched.AddBuiltin("3 1 * * *", func() {
-		if err := consolidate.Run(tctx, mem, br, resolved.MemoryRetentionDays, mem.Now()); err != nil {
+		if err := consolidate.Run(tctx, mem, br, resolved.MemoryRetentionDays, resolved.RawRetentionDays, mem.Now()); err != nil {
 			log.Printf("chat %d: consolidation failed: %v", id, err)
 		}
 	})
@@ -429,7 +429,7 @@ func (m *Manager) ConsolidateAll(ctx context.Context) {
 	for _, t := range tenants {
 		resolved := t.cfg.Resolved(m.global.Get())
 		log.Printf("chat %d: consolidating", t.id)
-		if err := consolidate.Run(ctx, t.mem, t.brain, resolved.MemoryRetentionDays, t.mem.Now()); err != nil {
+		if err := consolidate.Run(ctx, t.mem, t.brain, resolved.MemoryRetentionDays, resolved.RawRetentionDays, t.mem.Now()); err != nil {
 			log.Printf("chat %d: consolidation failed: %v", t.id, err)
 		}
 	}

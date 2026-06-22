@@ -28,12 +28,13 @@ type MemoryOps interface {
 	ReadDayFile(day string) (string, error)
 	AppendLongTerm(text string) error
 	DeleteDayFile(day string) error
+	PruneRawLogs(retentionDays int, now time.Time) (int, error)
 }
 
 // Run performs the nightly consolidation: compact each pending raw day into a dated
-// note (+ index gist + per-user notes), then age out notes older than retentionDays
-// into long-term memory.
-func Run(ctx context.Context, mem MemoryOps, sum Summarizer, retentionDays int, now time.Time) error {
+// note (+ index gist + per-user notes), age out notes older than retentionDays into
+// long-term memory, then drop raw logs past rawRetentionDays (already summarized in step 1).
+func Run(ctx context.Context, mem MemoryOps, sum Summarizer, retentionDays, rawRetentionDays int, now time.Time) error {
 	// 1. Episodic save: raw day logs -> dated notes.
 	for _, day := range mem.PendingRawDays() {
 		transcript, err := mem.RawTranscript(day)
@@ -83,6 +84,14 @@ func Run(ctx context.Context, mem MemoryOps, sum Summarizer, retentionDays int, 
 			log.Printf("consolidate: delete note %s: %v", day, err)
 		}
 		log.Printf("consolidate: aged out %s into long-term", day)
+	}
+
+	// 3. Drop raw logs past their retention window. They were compacted into dated notes
+	// in step 1, so this only reclaims the redundant verbatim transcripts.
+	if n, err := mem.PruneRawLogs(rawRetentionDays, now); err != nil {
+		log.Printf("consolidate: prune raw logs: %v", err)
+	} else if n > 0 {
+		log.Printf("consolidate: pruned %d raw logs", n)
 	}
 	return nil
 }

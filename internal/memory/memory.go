@@ -74,9 +74,10 @@ func (m *Manager) path(parts ...string) string {
 }
 
 // SystemContext assembles the STATIC system-prompt block: persona + always-loaded memory.
-// Everything here is stable for the life of a chat session (it changes only on persona /
-// long-term / day boundaries, which bump the version and rotate the session), so it forms a
-// clean, cacheable prefix. Per-speaker, volatile context lives in SpeakerContext + the user
+// Everything here is stable for the life of a chat session, so it forms a clean, cacheable
+// prefix. The version fingerprint that rotates the session tracks only the persona (by content)
+// and the day boundary — not long-term memory, so an incremental memory save keeps the live
+// session going (see version). Per-speaker, volatile context lives in SpeakerContext + the user
 // turn instead. Returns the text and a memory version (a fingerprint) used for rotation.
 func (m *Manager) SystemContext(_ context.Context, msg telegram.Message) (string, int, error) {
 	now := m.Now()
@@ -140,9 +141,12 @@ func (m *Manager) UserProfile(msg telegram.Message) string {
 }
 
 // version is a cheap fingerprint of the STATIC system context: it changes when the day rolls
-// over or when persona / long-term memory is rewritten. It deliberately ignores per-speaker
-// state (profiles now ride in the user turn), so different speakers in a group share one
-// session and keep the cached prefix warm.
+// over or when the persona is rewritten (hashed by CONTENT, so a no-op rewrite with identical
+// text doesn't rotate the session). Long-term memory is deliberately NOT fingerprinted: an
+// incremental memory save is already in the live conversation, so rotating mid-chat to bake it
+// into the prefix would only throw away continuity — the next-day / next session picks up the
+// updated long_term_memory.md naturally. It also ignores per-speaker state (profiles now ride
+// in the user turn), so different speakers in a group share one session and keep the prefix warm.
 func (m *Manager) version(now time.Time) int {
 	h := uint32(2166136261)
 	mix := func(s string) {
@@ -151,17 +155,8 @@ func (m *Manager) version(now time.Time) int {
 			h *= 16777619
 		}
 	}
-	mix(now.Format("2006-01-02")) // day boundary
-	paths := []string{
-		m.personaPath,
-		m.path("long_term_memory.md"),
-	}
-	for _, p := range paths {
-		if fi, err := os.Stat(p); err == nil {
-			mix(p)
-			mix(fi.ModTime().UTC().Format(time.RFC3339Nano))
-		}
-	}
+	mix(now.Format("2006-01-02"))    // day boundary
+	mix(readFileTrim(m.personaPath)) // persona content
 	return int(h & 0x7fffffff)
 }
 
