@@ -170,7 +170,7 @@ func (m *Manager) activate(id int64, cfg config.Chat) error {
 	sched := schedule.New(schedStore, loc, fire)
 	sched.Start(tctx)
 	// Per-chat nightly jobs.
-	_ = sched.AddBuiltin("3 1 * * *", func() {
+	_ = sched.AddBuiltin("3 3 * * *", func() {
 		if err := consolidate.Run(tctx, mem, br, resolved.MemoryRetentionDays, resolved.RawRetentionDays, mem.Now()); err != nil {
 			log.Printf("chat %d: consolidation failed: %v", id, err)
 		}
