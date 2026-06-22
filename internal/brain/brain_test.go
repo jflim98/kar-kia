@@ -196,8 +196,32 @@ func TestPickSessionRotation(t *testing.T) {
 	if _, resume := b.pickSession("1", 8, cap); resume {
 		t.Fatal("memory version change should rotate")
 	}
+	// The date no longer rotates the session — the daily rollover is driven by consolidation
+	// (RolloverSession), not the clock. A previous-day session still resumes.
 	put(7, 1, now.AddDate(0, 0, -1))
-	if _, resume := b.pickSession("1", 7, cap); resume {
-		t.Fatal("a session from a previous day should rotate")
+	if _, resume := b.pickSession("1", 7, cap); !resume {
+		t.Fatal("a previous-day session should resume (date no longer rotates)")
+	}
+}
+
+func TestRolloverSession(t *testing.T) {
+	dir := t.TempDir()
+	store, err := session.Load(filepath.Join(dir, "sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &Brain{chatID: 1, sessions: store}
+	if err := store.Put("1", session.NewSession(7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RolloverSession(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.Get("1"); ok {
+		t.Fatal("RolloverSession should drop the chat's session")
+	}
+	// Rolling over an already-empty store is a no-op, not an error.
+	if err := b.RolloverSession(); err != nil {
+		t.Fatalf("rollover on empty store: %v", err)
 	}
 }

@@ -231,10 +231,20 @@ func (b *Brain) toolsLine(chat config.Chat, isAdmin bool) string {
 func (b *Brain) pickSession(chatKey string, memVer, rotateTurnCap int) (session.Session, bool) {
 	cur, ok := b.sessions.Get(chatKey)
 	underCap := rotateTurnCap <= 0 || cur.TurnCount < rotateTurnCap
-	if ok && cur.MemoryVersion == memVer && underCap && sameDay(cur.CreatedAt, b.mem.Now()) {
+	if ok && cur.MemoryVersion == memVer && underCap {
 		return cur, true
 	}
 	return session.NewSession(memVer), false
+}
+
+// RolloverSession drops the chat's current session so the next message starts a fresh one.
+// Called by the nightly consolidation once memory has been compacted, so the new session's
+// cached prefix includes the just-written daily note (this is what rotates a chat across the
+// day boundary now that pickSession no longer rotates on the date).
+func (b *Brain) RolloverSession() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.sessions.Delete(strconv.FormatInt(b.chatID, 10))
 }
 
 // builtinTools: the model never gets filesystem tools — only WebSearch.
@@ -254,11 +264,4 @@ func (b *Brain) allowedTools(chat config.Chat, isAdmin bool) []string {
 		tools = append(tools, "mcp__"+s)
 	}
 	return tools
-}
-
-func sameDay(a, b time.Time) bool {
-	a = a.In(b.Location())
-	ay, am, ad := a.Date()
-	by, bm, bd := b.Date()
-	return ay == by && am == bm && ad == bd
 }

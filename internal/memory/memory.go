@@ -76,9 +76,10 @@ func (m *Manager) path(parts ...string) string {
 // SystemContext assembles the STATIC system-prompt block: persona + always-loaded memory.
 // Everything here is stable for the life of a chat session, so it forms a clean, cacheable
 // prefix. The version fingerprint that rotates the session tracks only the persona (by content)
-// and the day boundary — not long-term memory, so an incremental memory save keeps the live
-// session going (see version). Per-speaker, volatile context lives in SpeakerContext + the user
-// turn instead. Returns the text and a memory version (a fingerprint) used for rotation.
+// — not the date or long-term memory, so an incremental memory save keeps the live session
+// going and the daily rollover is driven by consolidation instead (see version). Per-speaker,
+// volatile context lives in SpeakerContext + the user turn instead. Returns the text and a
+// memory version (a fingerprint) used for rotation.
 func (m *Manager) SystemContext(_ context.Context, msg telegram.Message) (string, int, error) {
 	now := m.Now()
 	var b strings.Builder
@@ -112,7 +113,7 @@ func (m *Manager) SystemContext(_ context.Context, msg telegram.Message) (string
 	add("Yesterday ("+yesterday+")", filepath.Join("daily_memory", yesterday+".md"))
 	add("Day before ("+dayBefore+")", filepath.Join("daily_memory", dayBefore+".md"))
 
-	return b.String(), m.version(now), nil
+	return b.String(), m.version(), nil
 }
 
 // SpeakerLine and UserProfile are the DYNAMIC per-speaker pieces that ride in the user turn
@@ -140,14 +141,16 @@ func (m *Manager) UserProfile(msg telegram.Message) string {
 	return fmt.Sprintf("# About %s\n\n%s", chatPartner(msg), prof)
 }
 
-// version is a cheap fingerprint of the STATIC system context: it changes when the day rolls
-// over or when the persona is rewritten (hashed by CONTENT, so a no-op rewrite with identical
-// text doesn't rotate the session). Long-term memory is deliberately NOT fingerprinted: an
-// incremental memory save is already in the live conversation, so rotating mid-chat to bake it
-// into the prefix would only throw away continuity — the next-day / next session picks up the
-// updated long_term_memory.md naturally. It also ignores per-speaker state (profiles now ride
-// in the user turn), so different speakers in a group share one session and keep the prefix warm.
-func (m *Manager) version(now time.Time) int {
+// version is a cheap fingerprint of the STATIC system context: it changes only when the
+// persona is rewritten (hashed by CONTENT, so a no-op rewrite with identical text doesn't
+// rotate the session). It deliberately ignores the date — the daily rollover is driven by the
+// nightly consolidation finishing (see brain.RolloverSession), not the clock, so the session
+// survives the midnight boundary until the prior day has been compacted into a daily note.
+// Long-term memory is likewise NOT fingerprinted: an incremental memory save is already in the
+// live conversation, so rotating mid-chat to bake it into the prefix would only throw away
+// continuity. It also ignores per-speaker state (profiles ride in the user turn), so different
+// speakers in a group share one session and keep the prefix warm.
+func (m *Manager) version() int {
 	h := uint32(2166136261)
 	mix := func(s string) {
 		for i := 0; i < len(s); i++ {
@@ -155,7 +158,6 @@ func (m *Manager) version(now time.Time) int {
 			h *= 16777619
 		}
 	}
-	mix(now.Format("2006-01-02"))    // day boundary
 	mix(readFileTrim(m.personaPath)) // persona content
 	return int(h & 0x7fffffff)
 }
@@ -224,33 +226,26 @@ func (m *Manager) LogReply(_ context.Context, msg telegram.Message, text string)
 	})
 }
 
-// RecentChatContext returns up to maxMessages of the most recent messages for a chat
-// from today's raw log, formatted as a transcript. It drops a trailing "user" entry
-// (the current turn, already logged before the reply is generated). Returns "" if there
-// is no prior context. Used to carry context across a mid-day session rotation.
+// RecentChatContext returns up to maxMessages of the most recent messages for a chat,
+// formatted as a transcript, to carry context across a session rotation. It reads today's
+// raw log and, only if that doesn't fill the window (e.g. just after a post-midnight rollover),
+// tops up from the tail of yesterday's log so the new session still sees the recent thread.
+// It drops a trailing "user" entry (the current turn, already logged before the reply is
+// generated). Returns "" if there is no prior context.
 func (m *Manager) RecentChatContext(chatID int64, maxMessages int) string {
-	path := m.path("daily_memory", "_raw", dayStamp(m.Now())+".jsonl")
-
-	m.mu.Lock()
-	b, err := os.ReadFile(path)
-	m.mu.Unlock()
-	if err != nil {
-		return ""
-	}
-
-	var entries []rawEntry
-	for line := range strings.SplitSeq(string(b), "\n") {
-		if line == "" {
-			continue
-		}
-		var e rawEntry
-		if json.Unmarshal([]byte(line), &e) == nil && e.ChatID == chatID {
-			entries = append(entries, e)
-		}
-	}
+	now := m.Now()
+	entries := m.rawEntriesFor(dayStamp(now), chatID)
 	// Drop the trailing current user turn (it becomes the prompt).
 	if n := len(entries); n > 0 && entries[n-1].Role == "user" {
 		entries = entries[:n-1]
+	}
+	// Top up from yesterday's tail only if today doesn't fill the window.
+	if len(entries) < maxMessages {
+		y := m.rawEntriesFor(dayStamp(now.AddDate(0, 0, -1)), chatID)
+		if need := maxMessages - len(entries); len(y) > need {
+			y = y[len(y)-need:]
+		}
+		entries = append(y, entries...)
 	}
 	if len(entries) == 0 {
 		return ""
@@ -271,6 +266,29 @@ func (m *Manager) RecentChatContext(chatID int64, maxMessages int) string {
 		fmt.Fprintf(&sb, "%s: %s\n", who, e.Text)
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+// rawEntriesFor reads one day's raw log and returns the entries for the given chat, in order.
+// A missing/unreadable file yields no entries.
+func (m *Manager) rawEntriesFor(day string, chatID int64) []rawEntry {
+	m.mu.Lock()
+	b, err := os.ReadFile(m.path("daily_memory", "_raw", day+".jsonl"))
+	m.mu.Unlock()
+	if err != nil {
+		return nil
+	}
+
+	var entries []rawEntry
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if line == "" {
+			continue
+		}
+		var e rawEntry
+		if json.Unmarshal([]byte(line), &e) == nil && e.ChatID == chatID {
+			entries = append(entries, e)
+		}
+	}
+	return entries
 }
 
 // rawEntry is one line in daily_memory/_raw/DD-MM-YY.jsonl.

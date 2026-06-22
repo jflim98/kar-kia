@@ -168,6 +168,56 @@ func TestSystemContextIncludesPersona(t *testing.T) {
 	}
 }
 
+func TestRecentChatContextSpansDayBoundary(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")
+	now := m.Now()
+
+	rawLines := func(es []rawEntry) string {
+		var sb strings.Builder
+		for _, e := range es {
+			b, _ := json.Marshal(e)
+			sb.Write(b)
+			sb.WriteByte('\n')
+		}
+		return sb.String()
+	}
+	rawPath := func(day string) string { return filepath.Join("daily_memory", "_raw", day+".jsonl") }
+
+	writeMem(t, dir, rawPath(dayStamp(now.AddDate(0, 0, -1))), rawLines([]rawEntry{
+		{ChatID: 1, Role: "assistant", Text: "y1"},
+		{ChatID: 1, Role: "user", User: "alice", Text: "y2"},
+		{ChatID: 1, Role: "assistant", Text: "y3"},
+	}))
+	writeMem(t, dir, rawPath(dayStamp(now)), rawLines([]rawEntry{
+		{ChatID: 1, Role: "assistant", Text: "t1"},
+		{ChatID: 1, Role: "user", User: "alice", Text: "current"}, // trailing current turn
+	}))
+
+	// Window of 3: today gives "t1" (after dropping the current turn), topped up by the last
+	// two of yesterday (y2, y3) — but NOT y1, and never the dropped current turn.
+	got := m.RecentChatContext(1, 3)
+	for _, want := range []string{"y2", "y3", "t1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("carry-over missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "y1") {
+		t.Fatalf("carry-over should be bounded to maxMessages, got y1:\n%s", got)
+	}
+	if strings.Contains(got, "current") {
+		t.Fatalf("carry-over should drop the current turn:\n%s", got)
+	}
+	if iy2, iy3, it1 := strings.Index(got, "y2"), strings.Index(got, "y3"), strings.Index(got, "t1"); !(iy2 < iy3 && iy3 < it1) {
+		t.Fatalf("carry-over out of chronological order:\n%s", got)
+	}
+
+	// When today already fills the window, yesterday is not pulled in.
+	if got := m.RecentChatContext(1, 1); strings.Contains(got, "y3") {
+		t.Fatalf("full window should not reach into yesterday:\n%s", got)
+	}
+}
+
 func TestPruneRawLogs(t *testing.T) {
 	dir := t.TempDir()
 	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")

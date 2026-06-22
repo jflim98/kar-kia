@@ -7,6 +7,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"os"
 	"path/filepath"
@@ -119,6 +120,16 @@ func (m *Manager) Start(ctx context.Context) error {
 	return nil
 }
 
+// consolidationSpec returns a ~03:00 cron spec with a per-chat minute offset (0–10) derived
+// from the chat ID, so chats consolidate at slightly staggered times instead of all colliding
+// at once. Deterministic (FNV hash of the decimal ID, which handles the negative IDs Telegram
+// uses for groups) for a stable, even spread across restarts.
+func consolidationSpec(id int64) string {
+	h := fnv.New32a()
+	fmt.Fprintf(h, "%d", id)
+	return fmt.Sprintf("%d 3 * * *", h.Sum32()%11)
+}
+
 // activate builds and stores a tenant (caller ensures cfg.Enabled). Not locked.
 func (m *Manager) activate(id int64, cfg config.Chat) error {
 	dir := m.chatDir(id)
@@ -169,10 +180,17 @@ func (m *Manager) activate(id int64, cfg config.Chat) error {
 	}
 	sched := schedule.New(schedStore, loc, fire)
 	sched.Start(tctx)
-	// Per-chat nightly jobs.
-	_ = sched.AddBuiltin("3 3 * * *", func() {
+	// Per-chat nightly jobs. Consolidation compacts the day's memory, then rolls the session
+	// over so the next message starts fresh with the just-written daily note in its prefix.
+	_ = sched.AddBuiltin(consolidationSpec(id), func() {
 		if err := consolidate.Run(tctx, mem, br, resolved.MemoryRetentionDays, resolved.RawRetentionDays, mem.Now()); err != nil {
 			log.Printf("chat %d: consolidation failed: %v", id, err)
+			return
+		}
+		if err := br.RolloverSession(); err != nil {
+			log.Printf("chat %d: session rollover failed: %v", id, err)
+		} else {
+			log.Printf("chat %d: consolidated, session rolled over", id)
 		}
 	})
 	_ = sched.AddBuiltin("20 1 * * *", func() {
