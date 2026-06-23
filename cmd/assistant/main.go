@@ -62,6 +62,8 @@ Usage:
   assistant run         [--data-dir DIR]   run the daemon
   assistant consolidate [--data-dir DIR]   run nightly consolidation once
   assistant mcp <ls|add|import|rm> …       manage external MCP servers
+
+Common flags: --data-dir DIR (default $ASSISTANT_DATA_DIR or ./data)
 `)
 }
 

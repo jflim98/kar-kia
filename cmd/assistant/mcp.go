@@ -42,10 +42,10 @@ func mcpUsage() {
 	fmt.Fprint(os.Stderr, `assistant mcp - manage the external MCP server registry (local stdio servers)
 
 Usage:
-  assistant mcp ls                      list registered external servers
+  assistant mcp ls                      list registered external servers (alias: list)
   assistant mcp add NAME --command CMD [--arg A]... [--env K=V]...
   assistant mcp import [--from FILE] [--overwrite]   import from a Claude/MCP config
-  assistant mcp rm NAME                 remove a registered server
+  assistant mcp rm NAME                 remove a registered server (alias: remove)
 
 Common flags: --data-dir DIR (default $ASSISTANT_DATA_DIR or ./data)
 

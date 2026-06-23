@@ -142,8 +142,12 @@ func (r *runner) Run(ctx context.Context, in runInput) (runResult, error) {
 	if in.ImageB64 != "" {
 		return r.runStream(ctx, in)
 	}
-	args := append([]string{"-p", in.Prompt, "--output-format", "json"}, r.commonArgs(in)...)
+	// The prompt goes on stdin, not as a `-p <prompt>` argv element: Linux caps any single
+	// argument at MAX_ARG_STRLEN (128 KiB), so a large transcript would fail execve with E2BIG
+	// before claude even starts. stdin has no such limit.
+	args := append([]string{"-p", "--output-format", "json"}, r.commonArgs(in)...)
 	cmd := r.newCmd(ctx, in, args)
+	cmd.Stdin = strings.NewReader(in.Prompt)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
