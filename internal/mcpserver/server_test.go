@@ -11,6 +11,40 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+func TestParseAtUsesChatTimezone(t *testing.T) {
+	sg, err := time.LoadLocation("Asia/Singapore")
+	if err != nil {
+		t.Fatalf("load Asia/Singapore (tzdata missing?): %v", err)
+	}
+
+	// A bare wall-clock time is interpreted in the chat's zone, not UTC.
+	got, err := parseAt("2026-06-24 06:00", sg)
+	if err != nil {
+		t.Fatalf("parseAt: %v", err)
+	}
+	want := time.Date(2026, 6, 24, 6, 0, 0, 0, sg)
+	if !got.Equal(want) {
+		t.Fatalf("bare time: got %s, want %s", got, want)
+	}
+	// 6am SGT must be the same absolute instant as 22:00 UTC the previous day.
+	if u := got.UTC(); u.Hour() != 22 || u.Day() != 23 {
+		t.Fatalf("6am SGT should be 22:00 UTC on the 23rd, got %s", u)
+	}
+
+	// An explicit offset is honored as the absolute instant it names.
+	off, err := parseAt("2026-06-24T06:00:00+08:00", sg)
+	if err != nil {
+		t.Fatalf("parseAt offset: %v", err)
+	}
+	if !off.Equal(want) {
+		t.Fatalf("offset time: got %s, want %s", off, want)
+	}
+
+	if _, err := parseAt("not a time", sg); err == nil {
+		t.Fatal("expected error for unparseable 'at'")
+	}
+}
+
 // fakeChats implements ChatScheduler + ToolGate for one active chat (id 100). The "reminders"
 // server is admin-only (admin = user 7); the "memory" server is open to all.
 type fakeChats struct {

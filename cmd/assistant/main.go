@@ -17,6 +17,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	// Embed the IANA timezone database in the binary so time.LoadLocation works regardless of
+	// whether the host/container ships /usr/share/zoneinfo. The runtime image (node:*-slim) has
+	// no tzdata package, so without this every configured TZ (e.g. Asia/Singapore) would silently
+	// fall back to UTC — breaking cron firing, daily boundaries, and consolidation timing.
+	_ "time/tzdata"
 
 	"assistant/internal/brain"
 	"assistant/internal/chat"

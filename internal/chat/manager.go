@@ -157,6 +157,7 @@ func (m *Manager) activate(id int64, cfg config.Chat) error {
 
 	loc, lerr := time.LoadLocation(resolved.TZ)
 	if lerr != nil {
+		log.Printf("chat %d: load timezone %q failed (%v); falling back to UTC", id, resolved.TZ, lerr)
 		loc = time.UTC
 	}
 	schedStore, err := schedule.LoadStore(filepath.Join(dir, "schedules.json"))

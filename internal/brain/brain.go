@@ -51,6 +51,7 @@ type Memory interface {
 	LogReply(ctx context.Context, msg telegram.Message, text string)
 	RecentChatContext(chatID int64, maxMessages int) string
 	Now() time.Time
+	TZName() string
 }
 
 // carryOverTurns is how many recent in-chat messages to re-inject when a session rotates.
@@ -201,9 +202,13 @@ func (b *Brain) composeTurn(msg telegram.Message, chat config.Chat, isAdmin bool
 	parts := []string{line, b.toolsLine(chat, isAdmin)}
 	// Reminder guidance is admin-only and rides here (never the cached system prompt), gated by the
 	// SAME source as the tool allow-list so a non-admin is never told reminders exist or how to use
-	// them. Only surface it when reminders is actually enabled for this speaker.
+	// them. Only surface it when reminders is actually enabled for this speaker. The current local
+	// time + zone go with it so any one-off "at" time the model picks is in the right timezone.
 	if b.runner.mcpConfig != "" && slices.Contains(chat.ServersFor(isAdmin), config.ServerReminders) {
-		parts = append(parts, fmt.Sprintf("When scheduling reminders, pass chat_id %d.", msg.ChatID))
+		now := b.mem.Now()
+		parts = append(parts, fmt.Sprintf("When scheduling reminders, pass chat_id %d. The current time is %s in %s; "+
+			"give one-off 'at' times as local wall-clock in this timezone (don't convert to UTC).",
+			msg.ChatID, now.Format("2006-01-02 15:04 (Mon)"), b.mem.TZName()))
 	}
 	if prof := b.mem.UserProfile(msg); prof != "" {
 		parts = append(parts, prof)

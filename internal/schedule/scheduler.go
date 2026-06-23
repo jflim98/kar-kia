@@ -96,6 +96,10 @@ func (s *Scheduler) Remove(id string) (bool, error) {
 // List returns schedules (chatID 0 => all).
 func (s *Scheduler) List(chatID int64) []Schedule { return s.store.List(chatID) }
 
+// Location returns the timezone this scheduler fires in (the chat's configured TZ). Callers use
+// it to interpret zoneless one-off times in the same zone the cron engine uses.
+func (s *Scheduler) Location() *time.Location { return s.loc }
+
 func (s *Scheduler) activate(sc Schedule) error {
 	switch sc.Kind {
 	case KindCron:

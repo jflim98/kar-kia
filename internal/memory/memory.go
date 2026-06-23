@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,7 @@ type Manager struct {
 func New(memoryDir, personaPath, tz string) *Manager {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
+		log.Printf("memory: load timezone %q failed (%v); falling back to UTC", tz, err)
 		loc = time.UTC
 	}
 	return &Manager{
@@ -65,6 +67,10 @@ func New(memoryDir, personaPath, tz string) *Manager {
 
 // Now returns the current time in the configured timezone.
 func (m *Manager) Now() time.Time { return time.Now().In(m.tz) }
+
+// TZName returns the configured timezone's IANA name (e.g. "Asia/Singapore"), for telling the
+// model which zone its scheduled times are interpreted in.
+func (m *Manager) TZName() string { return m.tz.String() }
 
 // dayStamp formats a time as the DD-MM-YY filename stem.
 func dayStamp(t time.Time) string { return t.Format("02-01-06") }

@@ -99,7 +99,9 @@ func (s *Server) registerTools() {
 	s.rem.AddTool(mcp.NewTool("schedule_reminder",
 		mcp.WithDescription("Schedule a reminder or recurring job in THIS chat. Provide exactly one "+
 			"timing: 'cron' (5-field) for recurring, OR 'delay_minutes' for a one-off N minutes from now, "+
-			"OR 'at' (RFC3339) for a specific time."),
+			"OR 'at' for a specific time. Give 'at' as local wall-clock time 'YYYY-MM-DD HH:MM' in the "+
+			"chat's timezone (shown to you as the current time) — do not convert to UTC. Cron fields are "+
+			"likewise evaluated in the chat's timezone."),
 		mcp.WithNumber("chat_id", mcp.Required(), mcp.Description("Your current chat id.")),
 		mcp.WithNumber("user_id", mcp.Required(), mcp.Description("The requesting user's id (for the access check).")),
 		mcp.WithString("prompt", mcp.Required(), mcp.Description("What the assistant should do/say when it fires.")),
@@ -175,9 +177,9 @@ func (s *Server) handleSchedule(_ context.Context, req mcp.CallToolRequest) (*mc
 	case cronExpr != "":
 		sc.Kind, sc.Spec = schedule.KindCron, cronExpr
 	case atStr != "":
-		t, perr := time.Parse(time.RFC3339, atStr)
+		t, perr := parseAt(atStr, sched.Location())
 		if perr != nil {
-			return mcp.NewToolResultError("could not parse 'at' as RFC3339: " + perr.Error()), nil
+			return mcp.NewToolResultError(perr.Error()), nil
 		}
 		sc.Kind, sc.FireAt = schedule.KindOnce, t
 	case delay > 0:
@@ -280,6 +282,32 @@ func (s *Server) handlePropose(ctx context.Context, req mcp.CallToolRequest) (*m
 		return mcp.NewToolResultError("could not save memory: " + err.Error()), nil
 	}
 	return mcp.NewToolResultText(msg), nil
+}
+
+// parseAt interprets a one-off 'at' time. A bare wall-clock time (no zone) is read in loc — the
+// chat's configured timezone — so "remind me at 6am" lands at 6am local regardless of where the
+// daemon runs or what the model assumed. A timestamp that carries an explicit offset (e.g. full
+// RFC3339 with +08:00 or Z) is honored as the absolute instant it names.
+func parseAt(s string, loc *time.Location) (time.Time, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	// Zoneless layouts first (interpreted in loc); they won't match an offset-bearing string.
+	for _, layout := range []string{
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+	} {
+		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
+			return t, nil
+		}
+	}
+	// Offset-bearing (RFC3339): honor the instant it names.
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("could not parse 'at' %q; use 'YYYY-MM-DD HH:MM' (interpreted in this chat's timezone)", s)
 }
 
 func describe(sc schedule.Schedule) string {

@@ -39,6 +39,7 @@ func (f fakeMem) Record(context.Context, telegram.Message, bool)       {}
 func (f fakeMem) LogReply(context.Context, telegram.Message, string)   {}
 func (f fakeMem) RecentChatContext(int64, int) string                  { return "" }
 func (f fakeMem) Now() time.Time                                       { return f.now }
+func (f fakeMem) TZName() string                                       { return "UTC" }
 
 func TestReplyToolsNeverIncludeFilesystemAndGateByList(t *testing.T) {
 	b := &Brain{runner: &runner{mcpConfig: "x"}}
