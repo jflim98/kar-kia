@@ -51,6 +51,7 @@ type fakeMem struct {
 	written  map[string]string // day -> body
 	gists    map[string]string
 	userNote map[int64]string
+	profiles map[int64]string // existing + reconciled user profiles
 	longTerm []string
 	deleted  []string
 	rawArg   int // retentionDays passed to PruneRawLogs
@@ -64,6 +65,14 @@ func (f *fakeMem) WriteDayFile(day, gist, body string) error {
 	return nil
 }
 func (f *fakeMem) AppendUserNote(uid int64, note string) error { f.userNote[uid] = note; return nil }
+func (f *fakeMem) ReadUserProfile(uid int64) (string, error)   { return f.profiles[uid], nil }
+func (f *fakeMem) WriteUserProfile(uid int64, content string) error {
+	if f.profiles == nil {
+		f.profiles = map[int64]string{}
+	}
+	f.profiles[uid] = content
+	return nil
+}
 func (f *fakeMem) AgedDayFiles(int, time.Time) []string        { return f.aged }
 func (f *fakeMem) ReadDayFile(day string) (string, error)      { return f.dayFiles[day], nil }
 func (f *fakeMem) AppendLongTerm(text string) error {
@@ -119,5 +128,57 @@ func TestRunEpisodicAndAgeOut(t *testing.T) {
 	}
 	if len(mem.deleted) != 2 {
 		t.Fatalf("both aged notes should be deleted, got %v", mem.deleted)
+	}
+}
+
+func TestRunReconcilesExistingProfile(t *testing.T) {
+	mem := &fakeMem{
+		pending:  []string{"01-06-26"},
+		written:  map[string]string{}, gists: map[string]string{}, userNote: map[int64]string{},
+		profiles: map[int64]string{7: "- Lives in Berlin\n- Likes tea"},
+	}
+	sum := fakeSum{reply: func(instr string) string {
+		if strings.Contains(instr, "Consolidate one day") {
+			return "GIST: a day\nSUMMARY:\nstuff\nUSER_NOTES:\n7: Moved to Munich"
+		}
+		if strings.Contains(instr, "Update a person's memory profile") {
+			// The reconcile call sees both the old profile and the new fact.
+			if !strings.Contains(instr, "Berlin") || !strings.Contains(instr, "Munich") {
+				t.Fatalf("reconcile prompt missing context: %q", instr)
+			}
+			return "- Lives in Munich\n- Likes tea"
+		}
+		return "none"
+	}}
+
+	if err := Run(context.Background(), mem, sum, 14, 30, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if mem.profiles[7] != "- Lives in Munich\n- Likes tea" {
+		t.Fatalf("profile not reconciled: %q", mem.profiles[7])
+	}
+	if _, appended := mem.userNote[7]; appended {
+		t.Fatalf("should reconcile, not append, when a profile exists: %v", mem.userNote)
+	}
+}
+
+func TestReconcileFallsBackToAppendOnError(t *testing.T) {
+	mem := &fakeMem{
+		pending:  []string{"01-06-26"},
+		written:  map[string]string{}, gists: map[string]string{}, userNote: map[int64]string{},
+		profiles: map[int64]string{7: "- Likes tea"},
+	}
+	sum := fakeSum{reply: func(instr string) string {
+		if strings.Contains(instr, "Consolidate one day") {
+			return "GIST: a day\nSUMMARY:\nstuff\nUSER_NOTES:\n7: Likes coffee too"
+		}
+		return "" // reconcile returns empty -> fall back to append, never lose the fact
+	}}
+
+	if err := Run(context.Background(), mem, sum, 14, 30, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if mem.userNote[7] != "Likes coffee too" {
+		t.Fatalf("fact lost on reconcile failure: %v", mem.userNote)
 	}
 }

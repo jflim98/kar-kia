@@ -24,6 +24,8 @@ type MemoryOps interface {
 	RawTranscript(day string) (string, error)
 	WriteDayFile(day, gist, body string) error
 	AppendUserNote(userID int64, note string) error
+	ReadUserProfile(userID int64) (string, error)
+	WriteUserProfile(userID int64, content string) error
 	AgedDayFiles(retentionDays int, now time.Time) []string
 	ReadDayFile(day string) (string, error)
 	AppendLongTerm(text string) error
@@ -56,9 +58,7 @@ func Run(ctx context.Context, mem MemoryOps, sum Summarizer, retentionDays, rawR
 			continue
 		}
 		for uid, note := range userNotes {
-			if err := mem.AppendUserNote(uid, note); err != nil {
-				log.Printf("consolidate: user note %d: %v", uid, err)
-			}
+			reconcileUser(ctx, mem, sum, uid, note)
 		}
 		log.Printf("consolidate: saved daily note %s", day)
 	}
@@ -96,6 +96,45 @@ func Run(ctx context.Context, mem MemoryOps, sum Summarizer, retentionDays, rawR
 	return nil
 }
 
+// reconcileUser merges the day's new fact(s) about a user into their profile, rewriting it
+// into a coherent, deduped whole rather than appending. If reading the existing profile or the
+// summarize step fails, it falls back to a plain append so a fact is never lost.
+func reconcileUser(ctx context.Context, mem MemoryOps, sum Summarizer, uid int64, note string) {
+	existing, err := mem.ReadUserProfile(uid)
+	if err != nil {
+		log.Printf("consolidate: read profile %d: %v", uid, err)
+		appendUserNote(mem, uid, note)
+		return
+	}
+	if strings.TrimSpace(existing) == "" {
+		// Nothing to reconcile against yet — just record the new fact(s).
+		appendUserNote(mem, uid, note)
+		return
+	}
+	merged, err := sum.Summarize(ctx, reconcilePrompt(existing, note))
+	if err != nil {
+		log.Printf("consolidate: reconcile profile %d: %v", uid, err)
+		appendUserNote(mem, uid, note)
+		return
+	}
+	if strings.TrimSpace(merged) == "" {
+		appendUserNote(mem, uid, note)
+		return
+	}
+	if err := mem.WriteUserProfile(uid, merged); err != nil {
+		log.Printf("consolidate: write profile %d: %v", uid, err)
+		appendUserNote(mem, uid, note)
+		return
+	}
+	log.Printf("consolidate: reconciled profile %d", uid)
+}
+
+func appendUserNote(mem MemoryOps, uid int64, note string) {
+	if err := mem.AppendUserNote(uid, note); err != nil {
+		log.Printf("consolidate: user note %d: %v", uid, err)
+	}
+}
+
 func dayPrompt(day, transcript string) string {
 	return fmt.Sprintf(`Consolidate one day of chat history into a memory note. Date: %s.
 Be concise and factual; never invent anything. Respond EXACTLY in this format:
@@ -104,7 +143,11 @@ GIST: <one sentence describing the day, for an index>
 SUMMARY:
 <a short markdown summary of what mattered: decisions, facts, tasks, notable exchanges>
 USER_NOTES:
-<for each user with a durable fact worth remembering long-term, one line "<user_id>: <fact>"; write "none" if there are none>
+<durable facts worth remembering about specific people. Capture preferences, identity details,
+ongoing projects, relationships, and commitments — include facts that are merely IMPLIED by how
+someone spoke or what they did, not only ones they explicitly asked you to remember. Skip
+one-off trivia and anything fleeting. One line per fact, "<user_id>: <fact>" (a user may have
+several lines). Write "none" only if nothing durable came up.>
 
 Transcript:
 %s`, day, transcript)
@@ -117,6 +160,20 @@ as a short markdown bullet list. If nothing is durable, reply exactly "none".
 
 Note:
 %s`, day, content)
+}
+
+func reconcilePrompt(existing, newFacts string) string {
+	return fmt.Sprintf(`Update a person's memory profile by folding in newly learned facts.
+Return ONLY the updated profile as a concise markdown bullet list — no preamble, no headings.
+Rules: merge the new facts into the existing ones; remove duplicates and near-duplicates; when a
+new fact contradicts or updates an old one, keep the newer version and drop the stale one; drop
+trivia that isn't durable; keep it coherent and compact. Preserve everything still true.
+
+Existing profile:
+%s
+
+Newly learned:
+%s`, existing, newFacts)
 }
 
 // parseDayOutput splits the model's structured reply into a gist, a body, and per-user
@@ -162,7 +219,11 @@ func parseUserNotes(s string, into map[int64]string) {
 			continue
 		}
 		if n := strings.TrimSpace(note); n != "" {
-			into[uid] = n
+			if prev := into[uid]; prev != "" {
+				into[uid] = prev + "\n" + n
+			} else {
+				into[uid] = n
+			}
 		}
 	}
 }

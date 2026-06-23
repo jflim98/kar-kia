@@ -83,6 +83,22 @@ func (m *Manager) AppendUserNote(userID int64, note string) error {
 	return m.AppendKnowledge(ScopeUser, userID, note)
 }
 
+// ReadUserProfile returns a user's stored profile, or "" if they have none yet.
+func (m *Manager) ReadUserProfile(userID int64) (string, error) {
+	return readFileTrim(m.path("users", userFile(userID))), nil
+}
+
+// WriteUserProfile overwrites a user's profile with reconciled content (used by the nightly
+// consolidation to fold new facts in coherently instead of appending).
+func (m *Manager) WriteUserProfile(userID int64, content string) error {
+	if err := os.MkdirAll(m.path("users"), 0o755); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return os.WriteFile(m.path("users", userFile(userID)), []byte(strings.TrimSpace(content)+"\n"), 0o644)
+}
+
 // AppendLongTerm appends durable facts to long-term memory.
 func (m *Manager) AppendLongTerm(text string) error {
 	return m.AppendKnowledge(ScopeLongTerm, 0, text)

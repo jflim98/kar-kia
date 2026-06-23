@@ -48,6 +48,25 @@ func New(sender telegram.Sender, memOf func(int64) (Committer, bool), tokenOf fu
 	return &Manager{sender: sender, memOf: memOf, tokenOf: tokenOf, pending: map[string]pending{}}
 }
 
+// Save commits a fact to chat chatID's memory immediately, with no confirmation. Backs
+// the auto-save memory tool: the model decides what's worth remembering and it lands right
+// away; the nightly consolidation reconciles user profiles into coherent prose afterwards.
+func (m *Manager) Save(_ context.Context, chatID, userID int64, scope, content string) (string, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "", fmt.Errorf("empty content")
+	}
+	mem, ok := m.memOf(chatID)
+	if !ok {
+		return "", fmt.Errorf("chat %d is not configured", chatID)
+	}
+	scope = normalizeScope(scope)
+	if err := mem.AppendKnowledge(scope, userID, content); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Saved to %s.", scopeLabel(scope, userID)), nil
+}
+
 // Propose asks the user (in chat chatID) to confirm saving a fact. Backs propose_memory.
 func (m *Manager) Propose(ctx context.Context, chatID, userID int64, scope, content string) (string, error) {
 	content = strings.TrimSpace(content)

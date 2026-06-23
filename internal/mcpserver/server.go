@@ -26,9 +26,9 @@ type ChatScheduler interface {
 	Scheduler(chatID int64) (*schedule.Scheduler, bool)
 }
 
-// ProposalSink backs propose_memory (asks the user to confirm, commits on approval).
+// ProposalSink backs propose_memory: Save commits the fact to the chat's memory immediately.
 type ProposalSink interface {
-	Propose(ctx context.Context, chatID, userID int64, scope, content string) (string, error)
+	Save(ctx context.Context, chatID, userID int64, scope, content string) (string, error)
 }
 
 // MemoryRecaller backs recall_memory: the daemon searches a chat's memory and returns snippets.
@@ -139,8 +139,11 @@ func (s *Server) registerTools() {
 
 	if s.sink != nil {
 		s.mem.AddTool(mcp.NewTool("propose_memory",
-			mcp.WithDescription("Propose saving a fact to THIS chat's memory. Does NOT save immediately: "+
-				"the user is asked to confirm via Telegram and it's stored only on approval."),
+			mcp.WithDescription("Save a fact to THIS chat's memory immediately (no confirmation needed). "+
+				"Use it naturally whenever you learn something durable worth remembering — a preference, "+
+				"identity detail, ongoing project, relationship, or commitment — even if the user didn't "+
+				"explicitly ask you to remember it. Saves are reconciled into a clean profile overnight, so "+
+				"don't worry about duplicates."),
 			mcp.WithNumber("chat_id", mcp.Required(), mcp.Description("Your current chat id.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The fact to remember, phrased clearly.")),
 			mcp.WithString("scope", mcp.Description("'long_term' (default) or 'user' for a fact about the current user.")),
@@ -272,9 +275,9 @@ func (s *Server) handlePropose(ctx context.Context, req mcp.CallToolRequest) (*m
 		return mcp.NewToolResultError("content is required"), nil
 	}
 	scope := req.GetString("scope", "long_term")
-	msg, err := s.sink.Propose(ctx, int64(chatID), userID, scope, content)
+	msg, err := s.sink.Save(ctx, int64(chatID), userID, scope, content)
 	if err != nil {
-		return mcp.NewToolResultError("could not propose memory: " + err.Error()), nil
+		return mcp.NewToolResultError("could not save memory: " + err.Error()), nil
 	}
 	return mcp.NewToolResultText(msg), nil
 }

@@ -74,6 +74,32 @@ func TestProposeUsesChatTokenAndCommitsOnApprove(t *testing.T) {
 	}
 }
 
+func TestSaveCommitsImmediatelyWithoutConfirm(t *testing.T) {
+	s, c := &fakeSender{}, &fakeCommitter{}
+	m := newMgr(s, c)
+
+	if _, err := m.Save(context.Background(), 100, 7, "user", "Al likes tea"); err != nil {
+		t.Fatal(err)
+	}
+	if c.calls != 1 || c.scope != memory.ScopeUser || c.userID != 7 || c.content != "Al likes tea" {
+		t.Fatalf("save should commit immediately: %+v", c)
+	}
+	if s.token != "" {
+		t.Fatalf("save must not send a confirmation, but SendConfirm ran on token %q", s.token)
+	}
+}
+
+func TestSaveUnconfiguredChatErrors(t *testing.T) {
+	s, c := &fakeSender{}, &fakeCommitter{}
+	m := newMgr(s, c)
+	if _, err := m.Save(context.Background(), 999, 1, "long_term", "x"); err == nil {
+		t.Fatal("expected error saving in an unconfigured chat")
+	}
+	if c.calls != 0 {
+		t.Fatalf("nothing should commit for an unconfigured chat: %+v", c)
+	}
+}
+
 func TestRejectDoesNotCommit(t *testing.T) {
 	s, c := &fakeSender{}, &fakeCommitter{}
 	m := newMgr(s, c)

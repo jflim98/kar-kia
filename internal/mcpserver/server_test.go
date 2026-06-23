@@ -37,9 +37,9 @@ func (f *fakeChats) ToolAllowed(chatID, userID int64, server string) bool {
 
 type fakeSink struct{ called bool }
 
-func (f *fakeSink) Propose(context.Context, int64, int64, string, string) (string, error) {
+func (f *fakeSink) Save(context.Context, int64, int64, string, string) (string, error) {
 	f.called = true
-	return "asked", nil
+	return "saved", nil
 }
 
 type fakeRecall struct {
@@ -124,7 +124,7 @@ func TestProposeRoutes(t *testing.T) {
 		"chat_id": float64(100), "content": "remember this", "scope": "long_term",
 	}))
 	if res.IsError || !sink.called {
-		t.Fatalf("propose should route to the sink: %s", resultText(t, res))
+		t.Fatalf("save should route to the sink: %s", resultText(t, res))
 	}
 }
 
