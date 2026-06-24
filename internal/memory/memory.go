@@ -108,6 +108,12 @@ func (m *Manager) SystemContext(_ context.Context, msg telegram.Message) (string
 	b.WriteString("\n- recall_memory: only the last couple of days are loaded in full below; if the daily")
 	b.WriteString(" index points to an older day or topic whose details you need, fetch it by keyword")
 	b.WriteString(" (including synonyms) or by the day's date.")
+	b.WriteString("\n\nBeyond your memory tools you may have other tools available this chat (e.g. web")
+	b.WriteString(" search and chat-specific integrations). Call them whenever they'd make your answer")
+	b.WriteString(" more accurate or current — for example, search the web for facts, news, or anything")
+	b.WriteString(" you're not certain about rather than guessing. When several tool calls don't depend")
+	b.WriteString(" on each other, issue them together in one step. Use only the tools actually offered;")
+	b.WriteString(" never claim you ran one you didn't.")
 
 	if s := readFileTrim(m.personaPath); s != "" {
 		fmt.Fprintf(&b, "\n\n# Persona\n\n%s", s)

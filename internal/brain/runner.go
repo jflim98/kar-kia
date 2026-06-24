@@ -33,7 +33,7 @@ var disallowedBuiltins = []string{
 // runInput is one headless invocation.
 type runInput struct {
 	Model          string
-	SystemPrompt   string   // appended via --append-system-prompt (persona + memory)
+	SystemPrompt   string   // the full system prompt via --system-prompt (persona + memory + tool stub)
 	AllowedTools   []string // --allowedTools: the allow-list (WebSearch + this chat's MCP servers)
 	PermissionMode string   // default "default"
 	SessionID      string   // session UUID
@@ -77,7 +77,12 @@ type cliResult struct {
 func (r *runner) commonArgs(in runInput) []string {
 	a := []string{"--model", in.Model}
 	if in.SystemPrompt != "" {
-		a = append(a, "--append-system-prompt", in.SystemPrompt)
+		// --system-prompt (full override), NOT --append: this bot is a chat persona, not a coding
+		// agent, so we replace claude's default coding-agent system prompt entirely rather than
+		// fight it. The override also drops the per-machine cwd/env/git/memory-path sections that
+		// the default prompt would otherwise inject. SystemContext carries a tool-usage stub since
+		// we no longer inherit claude's built-in tool scaffolding.
+		a = append(a, "--system-prompt", in.SystemPrompt)
 	}
 	if r.mcpConfig != "" && !in.DisableMCP {
 		a = append(a, "--mcp-config", r.mcpConfig, "--strict-mcp-config")
