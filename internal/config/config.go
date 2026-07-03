@@ -74,6 +74,7 @@ type Global struct {
 	// Defaults applied when a new chat is created / a chat field is empty.
 	DefaultModel               string `yaml:"default_model" json:"default_model"`
 	DefaultConsolidationModel  string `yaml:"default_consolidation_model" json:"default_consolidation_model"`
+	DefaultEffort              string `yaml:"default_effort" json:"default_effort"` // reasoning effort: "" (CLI default), low, medium, high, xhigh, max
 	DefaultTZ                  string `yaml:"default_tz" json:"default_tz"`
 	DefaultMemoryRetentionDays int    `yaml:"default_memory_retention_days" json:"default_memory_retention_days"`
 	DefaultRawRetentionDays    int    `yaml:"default_raw_retention_days" json:"default_raw_retention_days"`

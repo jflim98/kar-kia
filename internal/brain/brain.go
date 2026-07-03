@@ -159,6 +159,7 @@ func (b *Brain) invoke(ctx context.Context, msg telegram.Message, prompt string)
 	tools := b.allowedTools(chat, isAdmin)
 	res, err := b.runner.Run(ctx, runInput{
 		Model:        chat.Model,
+		Effort:       chat.Effort,
 		SystemPrompt: sys,
 		AllowedTools: tools,
 		SessionID:    sess.ID,

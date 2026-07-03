@@ -30,9 +30,17 @@ var disallowedBuiltins = []string{
 	"Bash", "Read", "Write", "Edit", "NotebookEdit", "Glob", "Grep", "WebFetch", "Task",
 }
 
+// validEfforts are the reasoning-effort levels the `claude` CLI accepts (--effort). An empty
+// or unrecognized value means "don't pass --effort" so the CLI falls back to its own default —
+// a bad hand-edit can't break every call.
+var validEfforts = map[string]bool{
+	"low": true, "medium": true, "high": true, "xhigh": true, "max": true,
+}
+
 // runInput is one headless invocation.
 type runInput struct {
 	Model          string
+	Effort         string   // reasoning effort (--effort); "" or invalid => inherit the CLI default
 	SystemPrompt   string   // the full system prompt via --system-prompt (persona + memory + tool stub)
 	AllowedTools   []string // --allowedTools: the allow-list (WebSearch + this chat's MCP servers)
 	PermissionMode string   // default "default"
@@ -76,6 +84,9 @@ type cliResult struct {
 // commonArgs builds the flags shared by both the text and stream (image) modes.
 func (r *runner) commonArgs(in runInput) []string {
 	a := []string{"--model", in.Model}
+	if validEfforts[in.Effort] {
+		a = append(a, "--effort", in.Effort)
+	}
 	if in.SystemPrompt != "" {
 		// --system-prompt (full override), NOT --append: this bot is a chat persona, not a coding
 		// agent, so we replace claude's default coding-agent system prompt entirely rather than

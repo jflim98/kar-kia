@@ -48,8 +48,9 @@
         <div class="row">
           <div><label>Concurrency (claude -p)</label><input id="g_concurrency" type="number" min="1"></div>
           <div><label>Max budget USD / call</label><input id="g_max_budget_usd" type="number" step="0.01"></div>
-          <div><label>Default model</label><input id="g_default_model"></div>
-          <div><label>Default consolidation model</label><input id="g_default_consolidation_model"></div>
+          <div><label>Default model</label><select id="g_default_model"></select></div>
+          <div><label>Default consolidation model</label><select id="g_default_consolidation_model"></select></div>
+          <div><label>Default effort</label><select id="g_default_effort"><option value="">(CLI default)</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div>
           <div><label>Default timezone</label><input id="g_default_tz"></div>
           <div><label>Default rotate turn cap</label><input id="g_default_rotate_turn_cap" type="number"></div>
           <div><label>Default memory retention (days)</label><input id="g_default_memory_retention_days" type="number"></div>
@@ -83,8 +84,9 @@
         <div class="row">
           <div><label>Enabled</label><select id="d_enabled"><option value="false">false</option><option value="true">true</option></select></div>
           <div><label>Bot token</label><input id="d_bot_token" placeholder="123:ABC..."></div>
-          <div><label>Model</label><input id="d_model"></div>
-          <div><label>Consolidation model</label><input id="d_consolidation_model"></div>
+          <div><label>Model</label><select id="d_model"></select></div>
+          <div><label>Consolidation model</label><select id="d_consolidation_model"></select></div>
+          <div><label>Effort</label><select id="d_effort"><option value="">(default)</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></div>
           <div><label>Timezone</label><input id="d_tz"></div>
           <div><label>Group response mode</label><select id="d_group_response_mode"><option>mention</option><option>reply</option><option>all</option></select></div>
           <div><label>Record group chatter</label><select id="d_record_group_chatter"><option value="false">false</option><option value="true">true</option></select></div>
@@ -112,6 +114,17 @@ function ids2csv(a){ return (a||[]).join(', '); }
 function pill(id,on,label){ const e=$(id); e.textContent=on?(label||'set'):'not set'; e.className='pill '+(on?'on':'off'); }
 function escAttr(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
+// Model dropdowns: the claude CLI takes an alias for the latest model or a full name. Offer the
+// common aliases, but if the saved value is something else (a full id, a custom alias) keep it as
+// an option so it round-trips instead of silently resetting. An empty value shows "(default)".
+const MODEL_ALIASES=['haiku','sonnet','opus','fable'];
+function fillModelSelect(id,val){
+  const cur=val||'', opts=MODEL_ALIASES.slice();
+  if(cur && !opts.includes(cur)) opts.unshift(cur);
+  $(id).innerHTML=(cur===''?'<option value="" selected>(default)</option>':'')
+    + opts.map(m=>`<option${m===cur?' selected':''}>${esc(m)}</option>`).join('');
+}
+
 async function api(method,url,body){
   const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
   if(!r.ok) throw new Error((await r.text())||r.status);
@@ -121,7 +134,8 @@ async function api(method,url,body){
 // --- global ---
 function fillGlobal(g){
   $('g_concurrency').value=g.concurrency; $('g_max_budget_usd').value=g.max_budget_usd;
-  $('g_default_model').value=g.default_model; $('g_default_consolidation_model').value=g.default_consolidation_model;
+  fillModelSelect('g_default_model',g.default_model); fillModelSelect('g_default_consolidation_model',g.default_consolidation_model);
+  $('g_default_effort').value=g.default_effort||'';
   $('g_default_tz').value=g.default_tz; $('g_default_rotate_turn_cap').value=g.default_rotate_turn_cap;
   $('g_default_memory_retention_days').value=g.default_memory_retention_days; $('g_default_session_ttl_days').value=g.default_session_ttl_days;
   $('g_global_admin_user_ids').value=ids2csv(g.global_admin_user_ids);
@@ -131,6 +145,7 @@ function fillGlobal(g){
 async function saveGlobal(){
   const p={ concurrency:+$('g_concurrency').value, max_budget_usd:+$('g_max_budget_usd').value,
     default_model:$('g_default_model').value, default_consolidation_model:$('g_default_consolidation_model').value,
+    default_effort:$('g_default_effort').value,
     default_tz:$('g_default_tz').value, default_rotate_turn_cap:+$('g_default_rotate_turn_cap').value,
     default_memory_retention_days:+$('g_default_memory_retention_days').value, default_session_ttl_days:+$('g_default_session_ttl_days').value,
     global_admin_user_ids:csv($('g_global_admin_user_ids').value) };
@@ -219,7 +234,7 @@ async function openChat(id){
   curChatCfg=c; // keep the full config so non-editable fields (name/type/…) round-trip on save
   $('d_title').textContent='Chat '+id+(c.name?(' — '+c.name):'');
   $('d_enabled').value=String(!!c.enabled); $('d_bot_token').value=c.bot_token||'';
-  $('d_model').value=c.model||''; $('d_consolidation_model').value=c.consolidation_model||''; $('d_tz').value=c.tz||'';
+  fillModelSelect('d_model',c.model); fillModelSelect('d_consolidation_model',c.consolidation_model); $('d_effort').value=c.effort||''; $('d_tz').value=c.tz||'';
   $('d_group_response_mode').value=c.group_response_mode||'mention'; $('d_record_group_chatter').value=String(!!c.record_group_chatter);
   $('d_images_enabled').value=String(!!c.images_enabled);
   $('d_rotate_turn_cap').value=c.rotate_turn_cap||0; $('d_memory_retention_days').value=c.memory_retention_days||0; $('d_session_ttl_days').value=c.session_ttl_days||0;
@@ -232,7 +247,7 @@ async function saveChat(){
   // raw_retention_days, max_budget_usd) are preserved, then overlay the editable ones.
   const cfg=Object.assign({}, curChatCfg, {
     enabled:$('d_enabled').value==='true', bot_token:$('d_bot_token').value,
-    model:$('d_model').value, consolidation_model:$('d_consolidation_model').value, tz:$('d_tz').value,
+    model:$('d_model').value, consolidation_model:$('d_consolidation_model').value, effort:$('d_effort').value, tz:$('d_tz').value,
     group_response_mode:$('d_group_response_mode').value, record_group_chatter:$('d_record_group_chatter').value==='true',
     images_enabled:$('d_images_enabled').value==='true',
     rotate_turn_cap:+$('d_rotate_turn_cap').value, memory_retention_days:+$('d_memory_retention_days').value, session_ttl_days:+$('d_session_ttl_days').value,

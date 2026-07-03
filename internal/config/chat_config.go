@@ -17,6 +17,7 @@ type Chat struct {
 
 	Model              string `yaml:"model" json:"model"`
 	ConsolidationModel string `yaml:"consolidation_model" json:"consolidation_model"`
+	Effort             string `yaml:"effort" json:"effort"` // reasoning effort: "" (CLI default), low, medium, high, xhigh, max
 	TZ                 string `yaml:"tz" json:"tz"`
 
 	// AdminUserIDs are this chat's cron-admins (may schedule reminders/jobs here).
@@ -47,6 +48,7 @@ func NewChat(g Global, name, ctype, botToken string) Chat {
 		BotToken:            botToken,
 		Model:               g.DefaultModel,
 		ConsolidationModel:  g.DefaultConsolidationModel,
+		Effort:              g.DefaultEffort,
 		TZ:                  g.DefaultTZ,
 		GroupResponseMode:   GroupModeMention,
 		MemoryRetentionDays: g.DefaultMemoryRetentionDays,
@@ -66,6 +68,11 @@ func (c Chat) Resolved(g Global) Chat {
 	}
 	if c.ConsolidationModel == "" {
 		c.ConsolidationModel = g.DefaultConsolidationModel
+	}
+	// Effort "" is legitimate (inherit the CLI default); only backfill from the global default,
+	// which may itself be "" — so an operator who never sets effort keeps the CLI default.
+	if c.Effort == "" {
+		c.Effort = g.DefaultEffort
 	}
 	if c.TZ == "" {
 		c.TZ = g.DefaultTZ

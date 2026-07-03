@@ -16,6 +16,7 @@ type globalView struct {
 	GlobalAdminUserIDs         []int64 `json:"global_admin_user_ids"`
 	DefaultModel               string  `json:"default_model"`
 	DefaultConsolidationModel  string  `json:"default_consolidation_model"`
+	DefaultEffort              string  `json:"default_effort"`
 	DefaultTZ                  string  `json:"default_tz"`
 	DefaultMemoryRetentionDays int     `json:"default_memory_retention_days"`
 	DefaultSessionTTLDays      int     `json:"default_session_ttl_days"`
@@ -34,6 +35,7 @@ type globalPatch struct {
 	GlobalAdminUserIDs         *[]int64 `json:"global_admin_user_ids"`
 	DefaultModel               *string  `json:"default_model"`
 	DefaultConsolidationModel  *string  `json:"default_consolidation_model"`
+	DefaultEffort              *string  `json:"default_effort"`
 	DefaultTZ                  *string  `json:"default_tz"`
 	DefaultMemoryRetentionDays *int     `json:"default_memory_retention_days"`
 	DefaultSessionTTLDays      *int     `json:"default_session_ttl_days"`
@@ -55,6 +57,7 @@ func (s *Server) handleGlobal(w http.ResponseWriter, r *http.Request) {
 			GlobalAdminUserIDs:         c.GlobalAdminUserIDs,
 			DefaultModel:               c.DefaultModel,
 			DefaultConsolidationModel:  c.DefaultConsolidationModel,
+			DefaultEffort:              c.DefaultEffort,
 			DefaultTZ:                  c.DefaultTZ,
 			DefaultMemoryRetentionDays: c.DefaultMemoryRetentionDays,
 			DefaultSessionTTLDays:      c.DefaultSessionTTLDays,
@@ -77,6 +80,7 @@ func (s *Server) handleGlobal(w http.ResponseWriter, r *http.Request) {
 			}
 			setStr(&c.DefaultModel, p.DefaultModel)
 			setStr(&c.DefaultConsolidationModel, p.DefaultConsolidationModel)
+			setStr(&c.DefaultEffort, p.DefaultEffort)
 			setStr(&c.DefaultTZ, p.DefaultTZ)
 			setInt(&c.DefaultMemoryRetentionDays, p.DefaultMemoryRetentionDays)
 			setInt(&c.DefaultSessionTTLDays, p.DefaultSessionTTLDays)
