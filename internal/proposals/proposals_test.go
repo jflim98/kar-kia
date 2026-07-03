@@ -34,11 +34,19 @@ type fakeCommitter struct {
 	userID  int64
 	content string
 	calls   int
+	known   func(int64) bool // nil => every user is known
 }
 
 func (f *fakeCommitter) AppendKnowledge(scope string, userID int64, content string) error {
 	f.scope, f.userID, f.content, f.calls = scope, userID, content, f.calls+1
 	return nil
+}
+
+func (f *fakeCommitter) KnownUser(userID int64) bool {
+	if f.known == nil {
+		return true
+	}
+	return f.known(userID)
 }
 
 func newMgr(s *fakeSender, c *fakeCommitter) *Manager {
@@ -117,6 +125,39 @@ func TestProposeUnconfiguredChatErrors(t *testing.T) {
 	m := newMgr(s, c)
 	if _, err := m.Propose(context.Background(), 999, 1, "long_term", "x"); err == nil {
 		t.Fatal("expected error proposing in an unconfigured chat")
+	}
+}
+
+func TestUserScopeRequiresKnownUser(t *testing.T) {
+	s := &fakeSender{}
+	c := &fakeCommitter{known: func(uid int64) bool { return uid == 7 }}
+	m := newMgr(s, c)
+	ctx := context.Background()
+
+	// A hallucinated id must not create a profile.
+	if _, err := m.Save(ctx, 100, 42, "user", "junk fact"); err == nil {
+		t.Fatal("save with an unseen user_id should error")
+	}
+	// user scope without an id must error, not silently land in long-term.
+	if _, err := m.Save(ctx, 100, 0, "user", "orphan fact"); err == nil {
+		t.Fatal("save with scope user and no user_id should error")
+	}
+	if c.calls != 0 {
+		t.Fatalf("nothing should have committed: %+v", c)
+	}
+	// Propose is validated up front too — no confirmation is sent for a bad id.
+	if _, err := m.Propose(ctx, 100, 42, "user", "junk fact"); err == nil {
+		t.Fatal("propose with an unseen user_id should error")
+	}
+	if s.token != "" {
+		t.Fatalf("no confirm should be sent for a rejected propose, got token %q", s.token)
+	}
+	// A known user still works.
+	if _, err := m.Save(ctx, 100, 7, "user", "real fact"); err != nil {
+		t.Fatal(err)
+	}
+	if c.calls != 1 || c.userID != 7 {
+		t.Fatalf("known-user save should commit: %+v", c)
 	}
 }
 

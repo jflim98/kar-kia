@@ -18,7 +18,7 @@ func utf16Len(s string) int { return len(utf16.Encode([]rune(s))) }
 // "HTML style" (parse_mode=HTML). toTelegramHTML converts the common Markdown Claude
 // produces into the subset of HTML Telegram supports:
 //
-//	<b> <i> <s> <code> <pre> <a href> <blockquote>  (+ <pre><code class="language-x">)
+//	<b> <i> <s> <tg-spoiler> <code> <pre> <a href> <blockquote>  (+ <pre><code class="language-x">)
 //
 // Telegram does NOT support <h1>/<ul>/<li>/<p>, so headings become bold lines and
 // bullets become "• ". Only < > & are escaped. If our output is ever malformed,
@@ -30,6 +30,7 @@ var (
 	reBoldA   = regexp.MustCompile(`\*\*(.+?)\*\*`)
 	reBoldU   = regexp.MustCompile(`__(.+?)__`)
 	reStrike  = regexp.MustCompile(`~~(.+?)~~`)
+	reSpoiler = regexp.MustCompile(`\|\|(.+?)\|\|`)
 	reItalicU = regexp.MustCompile(`(^|[^\w])_([^_\n]+?)_($|[^\w])`)
 	reItalicA = regexp.MustCompile(`\*([^*\n]+?)\*`)
 	reLink    = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
@@ -106,6 +107,7 @@ func toTelegramHTML(md string) string {
 	md = reBoldA.ReplaceAllString(md, "<b>$1</b>")
 	md = reBoldU.ReplaceAllString(md, "<b>$1</b>")
 	md = reStrike.ReplaceAllString(md, "<s>$1</s>")
+	md = reSpoiler.ReplaceAllString(md, "<tg-spoiler>$1</tg-spoiler>")
 	md = reItalicU.ReplaceAllString(md, "$1<i>$2</i>$3")
 	md = reItalicA.ReplaceAllString(md, "<i>$1</i>")
 	md = reLink.ReplaceAllString(md, `<a href="$2">$1</a>`)

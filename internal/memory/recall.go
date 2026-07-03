@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Recall is the daemon-side memory retrieval behind the recall_memory MCP tool. The model
@@ -312,9 +313,14 @@ func dedupe(in []string) []string {
 	return out
 }
 
+// clip truncates s to at most n bytes, backing up to a rune boundary so it never emits
+// invalid UTF-8 (clipped text flows into prompts and Telegram messages).
 func clip(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return strings.TrimSpace(s[:n]) + "…"
 }

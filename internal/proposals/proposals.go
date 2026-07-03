@@ -17,8 +17,11 @@ import (
 )
 
 // Committer durably writes an approved fact (a chat's memory.Manager satisfies this).
+// KnownUser guards user-scoped saves: the model supplies the user_id, so an id never seen
+// in the chat is rejected rather than allowed to create a junk profile.
 type Committer interface {
 	AppendKnowledge(scope string, userID int64, content string) error
+	KnownUser(userID int64) bool
 }
 
 const (
@@ -61,10 +64,28 @@ func (m *Manager) Save(_ context.Context, chatID, userID int64, scope, content s
 		return "", fmt.Errorf("chat %d is not configured", chatID)
 	}
 	scope = normalizeScope(scope)
+	if err := checkUserScope(mem, scope, userID); err != nil {
+		return "", err
+	}
 	if err := mem.AppendKnowledge(scope, userID, content); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("Saved to %s.", scopeLabel(scope, userID)), nil
+}
+
+// checkUserScope validates a user-scoped save: the id must be present and belong to someone
+// actually seen in this chat, so a hallucinated id can't create a junk profile.
+func checkUserScope(mem Committer, scope string, userID int64) error {
+	if scope != memory.ScopeUser {
+		return nil
+	}
+	if userID == 0 {
+		return fmt.Errorf("scope 'user' requires the user_id shown with the message")
+	}
+	if !mem.KnownUser(userID) {
+		return fmt.Errorf("user_id %d has not been seen in this chat; check the id shown with the message, or use scope 'long_term'", userID)
+	}
+	return nil
 }
 
 // Propose asks the user (in chat chatID) to confirm saving a fact. Backs propose_memory.
@@ -78,6 +99,11 @@ func (m *Manager) Propose(ctx context.Context, chatID, userID int64, scope, cont
 		return "", fmt.Errorf("chat %d is not configured", chatID)
 	}
 	scope = normalizeScope(scope)
+	if mem, ok := m.memOf(chatID); ok {
+		if err := checkUserScope(mem, scope, userID); err != nil {
+			return "", err
+		}
+	}
 	key := uuid.NewString()
 
 	text := fmt.Sprintf("I'd like to remember this (%s):\n\n%q\n\nSave it?", scopeLabel(scope, userID), content)

@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"assistant/internal/telegram"
 )
@@ -224,12 +226,15 @@ func TestPruneRawLogs(t *testing.T) {
 	now := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
 
 	raw := func(day string) string { return filepath.Join("daily_memory", "_raw", day+".jsonl") }
+	note := func(day string) string { return filepath.Join("daily_memory", day+".md") }
 	today := "23-06-26"
-	recent := "18-06-26" // 5 days ago, within the 14-day window
-	old := "03-06-26"    // 20 days ago, beyond the window
-	for _, day := range []string{today, recent, old} {
+	recent := "18-06-26"     // 5 days ago, within the 14-day window
+	old := "03-06-26"        // 20 days ago, beyond the window, summarized
+	oldOrphan := "02-06-26"  // beyond the window but NEVER summarized — must be kept
+	for _, day := range []string{today, recent, old, oldOrphan} {
 		writeMem(t, dir, raw(day), "{}\n")
 	}
+	writeMem(t, dir, note(old), "the day's note\n") // only old was summarized
 
 	n, err := m.PruneRawLogs(14, now)
 	if err != nil {
@@ -239,12 +244,164 @@ func TestPruneRawLogs(t *testing.T) {
 		t.Fatalf("expected 1 raw log pruned, got %d", n)
 	}
 	if _, err := os.Stat(filepath.Join(dir, raw(old))); !os.IsNotExist(err) {
-		t.Fatal("old raw log should be deleted")
+		t.Fatal("old summarized raw log should be deleted")
 	}
-	for _, day := range []string{today, recent} {
+	// A raw log with no day note is the only copy of that day — never silently destroyed.
+	for _, day := range []string{today, recent, oldOrphan} {
 		if _, err := os.Stat(filepath.Join(dir, raw(day))); err != nil {
 			t.Fatalf("%s raw log should be kept: %v", day, err)
 		}
+	}
+}
+
+func TestDeleteDayFileRemovesRawToo(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")
+
+	day := "01-06-26"
+	writeMem(t, dir, filepath.Join("daily_memory", day+".md"), "note\n")
+	writeMem(t, dir, filepath.Join("daily_memory", "_raw", day+".jsonl"), "{}\n")
+
+	if err := m.DeleteDayFile(day); err != nil {
+		t.Fatal(err)
+	}
+	// Without this, the leftover raw makes the day "pending" again and it resurrects
+	// next consolidation, re-appending its facts to long-term memory.
+	if _, err := os.Stat(filepath.Join(dir, "daily_memory", "_raw", day+".jsonl")); !os.IsNotExist(err) {
+		t.Fatal("age-out must remove the raw log along with the note")
+	}
+	if len(m.PendingRawDays()) != 0 {
+		t.Fatalf("aged-out day must not be pending again: %v", m.PendingRawDays())
+	}
+}
+
+func TestWriteUserProfileIfDetectsConcurrentWrite(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")
+
+	if err := m.AppendKnowledge(ScopeUser, 7, "likes tea"); err != nil {
+		t.Fatal(err)
+	}
+	read, _ := m.ReadUserProfile(7)
+
+	// A write lands after the read (simulating a propose_memory save during summarize).
+	if err := m.AppendKnowledge(ScopeUser, 7, "allergic to peanuts"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := m.WriteUserProfileIf(7, "- reconciled", read); err != nil || ok {
+		t.Fatalf("stale expected must not write: ok=%v err=%v", ok, err)
+	}
+	if prof, _ := m.ReadUserProfile(7); !strings.Contains(prof, "peanuts") {
+		t.Fatalf("concurrent append clobbered: %q", prof)
+	}
+
+	// With a fresh read the write goes through.
+	fresh, _ := m.ReadUserProfile(7)
+	if ok, err := m.WriteUserProfileIf(7, "- reconciled", fresh); err != nil || !ok {
+		t.Fatalf("matching expected should write: ok=%v err=%v", ok, err)
+	}
+	if prof, _ := m.ReadUserProfile(7); prof != "- reconciled" {
+		t.Fatalf("profile not rewritten: %q", prof)
+	}
+}
+
+func TestWriteLongTermIfKeepsBackup(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")
+
+	if err := m.AppendLongTerm("the sky is blue"); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := m.ReadLongTerm()
+
+	if ok, err := m.WriteLongTermIf("- compacted", before); err != nil || !ok {
+		t.Fatalf("compaction write failed: ok=%v err=%v", ok, err)
+	}
+	if got, _ := m.ReadLongTerm(); got != "- compacted" {
+		t.Fatalf("long-term not rewritten: %q", got)
+	}
+	bak, err := os.ReadFile(filepath.Join(dir, "long_term_memory.md.bak"))
+	if err != nil || !strings.Contains(string(bak), "sky is blue") {
+		t.Fatalf("pre-compaction backup missing: %q err=%v", bak, err)
+	}
+	// Stale expected must not write (nor touch the backup).
+	if ok, _ := m.WriteLongTermIf("- clobber", before); ok {
+		t.Fatal("stale expected must not overwrite long-term memory")
+	}
+}
+
+func TestCatchupBufferCapped(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")
+	ctx := context.Background()
+
+	g := func(text string) telegram.Message {
+		return telegram.Message{ChatID: -100, IsGroup: true, UserID: 1, UserName: "@al", Text: text}
+	}
+	for i := 0; i < catchupCap+10; i++ {
+		m.Record(ctx, g(fmt.Sprintf("msg-%03d", i)), false)
+	}
+
+	prompt := m.BuildPrompt(ctx, g("@bot summarize"))
+	if !strings.Contains(prompt, "earlier messages omitted") {
+		t.Fatalf("trimmed buffer should say so:\n%.200s", prompt)
+	}
+	if strings.Contains(prompt, "msg-000") {
+		t.Fatal("oldest messages should be dropped at the cap")
+	}
+	last := fmt.Sprintf("msg-%03d", catchupCap+9)
+	if !strings.Contains(prompt, last) {
+		t.Fatalf("most recent message missing: want %s", last)
+	}
+	if n := strings.Count(prompt, "msg-"); n != catchupCap {
+		t.Fatalf("buffer should hold exactly %d messages, got %d", catchupCap, n)
+	}
+}
+
+func TestKnownUser(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")
+	ctx := context.Background()
+
+	if m.KnownUser(0) || m.KnownUser(42) {
+		t.Fatal("no one should be known in an empty chat")
+	}
+	// Seen in a raw log (the current speaker is always logged before the reply).
+	m.Record(ctx, telegram.Message{ChatID: 5, UserID: 7, UserName: "@al", Text: "hi"}, true)
+	if !m.KnownUser(7) {
+		t.Fatal("a user in the raw log should be known")
+	}
+	// Or via an existing profile.
+	if err := m.AppendKnowledge(ScopeUser, 9, "likes tea"); err != nil {
+		t.Fatal(err)
+	}
+	if !m.KnownUser(9) {
+		t.Fatal("a user with a profile should be known")
+	}
+	if m.KnownUser(42) {
+		t.Fatal("an unseen id must not be known")
+	}
+}
+
+func TestAppendKnowledgeUserScopeRequiresID(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, filepath.Join(dir, "persona.md"), "UTC")
+	if err := m.AppendKnowledge(ScopeUser, 0, "orphan"); err == nil {
+		t.Fatal("scope user with uid 0 must error, not silently land in long-term")
+	}
+	if got, _ := m.ReadLongTerm(); got != "" {
+		t.Fatalf("nothing should have been written: %q", got)
+	}
+}
+
+func TestClipRuneSafe(t *testing.T) {
+	s := strings.Repeat("é", 10) // 2 bytes per rune
+	got := clip(s, 5)            // would split a rune at byte 5
+	if !utf8.ValidString(got) {
+		t.Fatalf("clip produced invalid UTF-8: %q", got)
+	}
+	if clip("short", 100) != "short" {
+		t.Fatal("clip must pass short strings through")
 	}
 }
 

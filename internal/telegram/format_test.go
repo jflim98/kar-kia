@@ -55,6 +55,7 @@ func TestToTelegramHTML(t *testing.T) {
 		{"italic underscore", "an _important_ note", "an <i>important</i> note"},
 		{"snake_case not italic", "call do_the_thing now", "call do_the_thing now"},
 		{"strike", "~~gone~~", "<s>gone</s>"},
+		{"spoiler", "the killer is ||the butler||", "the killer is <tg-spoiler>the butler</tg-spoiler>"},
 		{"inline code", "use `go build` here", "use <code>go build</code> here"},
 		{"link", "see [docs](https://x.io)", `see <a href="https://x.io">docs</a>`},
 		{"heading", "## Title", "<b>Title</b>"},

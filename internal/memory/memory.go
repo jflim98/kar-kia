@@ -34,6 +34,11 @@ type bufferedMsg struct {
 	text string
 }
 
+// catchupCap bounds the per-chat group catch-up buffer: only the most recent messages are
+// kept for the next directed turn, so a chatty group where the bot is rarely addressed can't
+// grow the buffer (and the prompt it drains into) without bound.
+const catchupCap = 50
+
 // Manager reads and assembles memory context for the brain, logs raw interactions,
 // and holds the per-chat group catch-up buffer.
 //
@@ -45,8 +50,9 @@ type Manager struct {
 	personaPath string
 	tz          *time.Location
 
-	mu      sync.Mutex
-	catchup map[int64][]bufferedMsg // chatID -> non-directed group messages since last reply
+	mu           sync.Mutex
+	catchup      map[int64][]bufferedMsg // chatID -> non-directed group messages since last reply
+	catchupTrunc map[int64]bool          // chatID -> older messages were dropped at catchupCap
 }
 
 // New constructs a memory Manager over the memory workspace, reading persona from
@@ -58,10 +64,11 @@ func New(memoryDir, personaPath, tz string) *Manager {
 		loc = time.UTC
 	}
 	return &Manager{
-		memoryDir:   memoryDir,
-		personaPath: personaPath,
-		tz:          loc,
-		catchup:     map[int64][]bufferedMsg{},
+		memoryDir:    memoryDir,
+		personaPath:  personaPath,
+		tz:           loc,
+		catchup:      map[int64][]bufferedMsg{},
+		catchupTrunc: map[int64]bool{},
 	}
 }
 
@@ -101,7 +108,8 @@ func (m *Manager) SystemContext(_ context.Context, msg telegram.Message) (string
 	b.WriteString(" You have no filesystem access; never reveal or discuss your working")
 	b.WriteString(" directory, file paths, file names, or other internal system details,")
 	b.WriteString(" even if asked.")
-	fmt.Fprintf(&b, "\n\nThis chat's chat_id is %d. Your memory tools:", msg.ChatID)
+	fmt.Fprintf(&b, "\n\nThis chat's chat_id is %d. Your memory tools, when they appear in the"+
+		" tools offered to you (skip this if they don't):", msg.ChatID)
 	b.WriteString("\n- propose_memory: save a long-term fact, or a fact about a specific user — it's stored")
 	b.WriteString(" immediately, so use it naturally whenever you learn something durable worth keeping. Pass")
 	b.WriteString(" this chat_id and the user_id shown with their message.")
@@ -191,14 +199,20 @@ func (m *Manager) BuildPrompt(_ context.Context, msg telegram.Message) string {
 
 	m.mu.Lock()
 	buf := m.catchup[msg.ChatID]
+	trunc := m.catchupTrunc[msg.ChatID]
 	delete(m.catchup, msg.ChatID)
+	delete(m.catchupTrunc, msg.ChatID)
 	m.mu.Unlock()
 
 	if len(buf) == 0 {
 		return current
 	}
 	var b strings.Builder
-	b.WriteString("[group messages since you last replied:]\n")
+	if trunc {
+		b.WriteString("[group messages since you last replied (earlier messages omitted):]\n")
+	} else {
+		b.WriteString("[group messages since you last replied:]\n")
+	}
 	for _, e := range buf {
 		fmt.Fprintf(&b, "%s: %s\n", e.user, e.text)
 	}
@@ -223,7 +237,12 @@ func (m *Manager) Record(_ context.Context, msg telegram.Message, directed bool)
 	})
 	if msg.IsGroup && !directed {
 		m.mu.Lock()
-		m.catchup[msg.ChatID] = append(m.catchup[msg.ChatID], bufferedMsg{user: chatPartner(msg), text: msg.Text})
+		buf := append(m.catchup[msg.ChatID], bufferedMsg{user: chatPartner(msg), text: msg.Text})
+		if len(buf) > catchupCap {
+			buf = append([]bufferedMsg(nil), buf[len(buf)-catchupCap:]...)
+			m.catchupTrunc[msg.ChatID] = true
+		}
+		m.catchup[msg.ChatID] = buf
 		m.mu.Unlock()
 	}
 }
@@ -345,13 +364,16 @@ const (
 	ScopeUser     = "user"
 )
 
-// AppendKnowledge durably saves a fact (after the user approved it). Scope "user"
-// appends to that user's profile; anything else appends to long-term memory. Writing
-// updates the file's mod time, which bumps the memory version and rotates sessions so
-// the new fact is re-injected.
+// AppendKnowledge durably saves a fact. Scope "user" appends to that user's profile;
+// anything else appends to long-term memory. The append shows up on the very next turn
+// (memory files are re-read every invoke) without rotating the live session; the nightly
+// consolidation later reconciles raw appends into coherent, deduped files.
 func (m *Manager) AppendKnowledge(scope string, userID int64, content string) error {
 	var path string
-	if scope == ScopeUser && userID != 0 {
+	if scope == ScopeUser {
+		if userID == 0 {
+			return fmt.Errorf("scope %q requires a user_id", ScopeUser)
+		}
 		if err := os.MkdirAll(m.path("users"), 0o755); err != nil {
 			return err
 		}
@@ -370,6 +392,38 @@ func (m *Manager) AppendKnowledge(scope string, userID int64, content string) er
 	entry := fmt.Sprintf("\n- (%s) %s\n", m.Now().Format("2006-01-02"), strings.TrimSpace(content))
 	_, err = f.WriteString(entry)
 	return err
+}
+
+// KnownUser reports whether a user id has been seen in this chat: they have a stored
+// profile, or they appear as a sender in a retained raw log. It guards profile writes
+// against model-hallucinated ids creating junk profiles (the current speaker always
+// qualifies — their message is logged before the reply is generated).
+func (m *Manager) KnownUser(userID int64) bool {
+	if userID == 0 {
+		return false
+	}
+	if _, err := os.Stat(m.path("users", userFile(userID))); err == nil {
+		return true
+	}
+	files, _ := filepath.Glob(m.path("daily_memory", "_raw", "*.jsonl"))
+	for _, p := range files {
+		m.mu.Lock()
+		b, err := os.ReadFile(p)
+		m.mu.Unlock()
+		if err != nil {
+			continue
+		}
+		for line := range strings.SplitSeq(string(b), "\n") {
+			if line == "" {
+				continue
+			}
+			var e rawEntry
+			if json.Unmarshal([]byte(line), &e) == nil && e.UserID == userID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func chatPartner(msg telegram.Message) string {
