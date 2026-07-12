@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assistant Admin</title>
+<style>
+  :root { --bg:#0f1216; --card:#171c23; --fg:#e6e9ee; --muted:#8a93a2; --accent:#4f8cff; --line:#2a313c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui,sans-serif; }
+  .wrap { max-width:820px; margin:0 auto; padding:24px; }
+  h1 { font-size:18px; margin:0 0 16px; } h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:22px 0 8px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
+  label { display:block; margin:10px 0 4px; color:var(--muted); font-size:12px; }
+  input,select,textarea { width:100%; padding:8px 10px; background:#0c0f13; color:var(--fg); border:1px solid var(--line); border-radius:6px; font:inherit; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:9px 16px; font:inherit; cursor:pointer; }
+  button.secondary { background:#2a313c; }
+  .msg { margin:12px 0; padding:8px 10px; border-radius:6px; display:none; }
+  .msg.ok { display:block; background:#15351f; color:#7ee2a0; } .msg.err { display:block; background:#3a1a1a; color:#ff9b9b; }
+  .hint { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; } td,th { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); }
+  tr.chat { cursor:pointer; } tr.chat:hover { background:#1d242d; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px; }
+  .on { background:#15351f; color:#7ee2a0; } .off { background:#3a1a1a; color:#ff9b9b; }
+  .topbar { display:flex; justify-content:space-between; align-items:center; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar"><h1>🤖 Assistant Admin</h1><button id="logout" class="secondary hidden">Log out</button></div>
+
+  <div id="login" class="card">
+    <label for="pw">Password</label>
+    <input id="pw" type="password" placeholder="webui_password">
+    <div style="margin-top:12px"><button id="loginBtn">Log in</button></div>
+    <div id="loginMsg" class="msg"></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div id="msg" class="msg"></div>
+
+    <!-- DASHBOARD -->
+    <div id="dash">
+      <div class="card">
+        <h2>Global settings</h2>
+        <div class="row">
+          <div><label>Concurrency (claude -p)</label><input id="g_concurrency" type="number" min="1"></div>
+          <div><label>Max budget USD / call</label><input id="g_max_budget_usd" type="number" step="0.01"></div>
+          <div><label>Default model</label><select id="g_default_model"></select></div>
+          <div><label>Default consolidation model</label><select id="g_default_consolidation_model"></select></div>
+          <div><label>Default effort</label><select id="g_default_effort"></select></div>
+          <div><label>Default consolidation effort</label><select id="g_default_consolidation_effort"></select></div>
+          <div><label>Default timezone</label><input id="g_default_tz"></div>
+          <div><label>Default rotate turn cap</label><input id="g_default_rotate_turn_cap" type="number"></div>
+          <div><label>Default memory retention (days)</label><input id="g_default_memory_retention_days" type="number"></div>
+          <div><label>Default session TTL (days)</label><input id="g_default_session_ttl_days" type="number"></div>
+        </div>
+        <label>Global admin user IDs (comma-separated)</label><input id="g_global_admin_user_ids">
+
+        <h2>Secrets <span class="hint">(write-only; leave blank to keep)</span></h2>
+        <label>Web UI password <span id="g_pw_set" class="pill"></span></label><input id="g_webui_password" type="password" placeholder="•••••• (unchanged)">
+        <label>Bot tokens <span id="g_tok_count" class="pill"></span> <span class="hint">— one per line; replaces the list</span></label><textarea id="g_bot_tokens" rows="3" placeholder="123:ABC...&#10;456:DEF..."></textarea>
+        <label>Claude OAuth token <span id="g_oauth_set" class="pill"></span></label><input id="g_claude_code_oauth_token" placeholder="•••••• (unchanged)">
+        <div style="margin-top:14px"><button id="saveGlobal">Save global</button></div>
+      </div>
+
+      <div class="card">
+        <h2>MCP servers <span class="hint">— external tools (local stdio). Built-in "memory" &amp; "reminders" are always available. Enable per chat below.</span></h2>
+        <div id="mcplist"></div>
+        <div style="margin-top:10px"><button class="secondary" id="addMcp">+ Add server</button> <button id="saveMcp">Save servers</button></div>
+      </div>
+
+      <div class="card">
+        <h2>Chats</h2>
+        <div id="chatlist"><span class="hint">loading…</span></div>
+      </div>
+    </div>
+
+    <!-- CHAT DETAIL -->
+    <div id="detail" class="hidden">
+      <div class="card">
+        <div class="topbar"><h2 id="d_title" style="margin:0">Chat</h2><button class="secondary" id="back">← Back</button></div>
+        <div class="row">
+          <div><label>Enabled</label><select id="d_enabled"><option value="false">false</option><option value="true">true</option></select></div>
+          <div><label>Bot token</label><input id="d_bot_token" placeholder="123:ABC..."></div>
+          <div><label>Model</label><select id="d_model"></select></div>
+          <div><label>Consolidation model</label><select id="d_consolidation_model"></select></div>
+          <div><label>Effort</label><select id="d_effort"></select></div>
+          <div><label>Consolidation effort</label><select id="d_consolidation_effort"></select></div>
+          <div><label>Timezone</label><input id="d_tz"></div>
+          <div><label>Group response mode</label><select id="d_group_response_mode"><option>mention</option><option>reply</option><option>all</option></select></div>
+          <div><label>Record group chatter</label><select id="d_record_group_chatter"><option value="false">false</option><option value="true">true</option></select></div>
+          <div><label>Accept images (vision)</label><select id="d_images_enabled"><option value="false">false</option><option value="true">true</option></select></div>
+          <div><label>Rotate turn cap (0 = never)</label><input id="d_rotate_turn_cap" type="number"></div>
+          <div><label>Memory retention (days)</label><input id="d_memory_retention_days" type="number"></div>
+          <div><label>Session TTL (days)</label><input id="d_session_ttl_days" type="number"></div>
+        </div>
+        <label>Cron-admin user IDs (comma-separated)</label><input id="d_admin_user_ids">
+        <h2>Tools <span class="hint">— which MCP servers this chat may use, and for whom</span></h2>
+        <div id="d_tools" class="hint">loading…</div>
+        <h2>Persona</h2>
+        <textarea id="d_persona" rows="8" style="font-family:monospace"></textarea>
+        <div style="margin-top:14px"><button id="saveChat">Save chat</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function show(el,k,t){ el.className='msg '+k; el.textContent=t; }
+function csv(s){ return s.split(',').map(x=>x.trim()).filter(Boolean).map(Number).filter(n=>!isNaN(n)); }
+function ids2csv(a){ return (a||[]).join(', '); }
+function pill(id,on,label){ const e=$(id); e.textContent=on?(label||'set'):'not set'; e.className='pill '+(on?'on':'off'); }
+function escAttr(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// Dropdown option lists come from the server (config.ModelAliases / config.EffortLevels via
+// GET /admin/api/global) so Go stays the single source of truth. Populated by fillGlobal on load.
+let MODEL_ALIASES=[], EFFORT_LEVELS=[];
+// Model dropdowns: the claude CLI takes an alias for the latest model or a full name. Offer the
+// server's aliases, but if the saved value is something else (a full id, a custom alias) keep it
+// as an option so it round-trips instead of silently resetting. An empty value shows "(default)".
+function fillModelSelect(id,val){
+  const cur=val||'', opts=MODEL_ALIASES.slice();
+  if(cur && !opts.includes(cur)) opts.unshift(cur);
+  $(id).innerHTML=(cur===''?'<option value="" selected>(default)</option>':'')
+    + opts.map(m=>`<option${m===cur?' selected':''}>${esc(m)}</option>`).join('');
+}
+// Effort dropdowns: server-provided levels plus a blank "inherit" option (label varies by scope).
+function fillEffortSelect(id,val,blankLabel){
+  const cur=val||'';
+  $(id).innerHTML=`<option value="" ${cur===''?'selected':''}>${esc(blankLabel)}</option>`
+    + EFFORT_LEVELS.map(e=>`<option${e===cur?' selected':''}>${esc(e)}</option>`).join('');
+}
+
+async function api(method,url,body){
+  const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  if(!r.ok) throw new Error((await r.text())||r.status);
+  return r.status===204?null:r.json();
+}
+
+// --- global ---
+function fillGlobal(g){
+  $('g_concurrency').value=g.concurrency; $('g_max_budget_usd').value=g.max_budget_usd;
+  MODEL_ALIASES=g.model_options||[]; EFFORT_LEVELS=g.effort_options||[];
+  fillModelSelect('g_default_model',g.default_model); fillModelSelect('g_default_consolidation_model',g.default_consolidation_model);
+  fillEffortSelect('g_default_effort',g.default_effort,'(CLI default)');
+  fillEffortSelect('g_default_consolidation_effort',g.default_consolidation_effort,'(CLI default)');
+  $('g_default_tz').value=g.default_tz; $('g_default_rotate_turn_cap').value=g.default_rotate_turn_cap;
+  $('g_default_memory_retention_days').value=g.default_memory_retention_days; $('g_default_session_ttl_days').value=g.default_session_ttl_days;
+  $('g_global_admin_user_ids').value=ids2csv(g.global_admin_user_ids);
+  $('g_bot_tokens').value=(g.bot_tokens||[]).join('\n');
+  pill('g_pw_set',g.webui_password_set); pill('g_tok_count',(g.bot_tokens||[]).length>0,(g.bot_tokens||[]).length+' set'); pill('g_oauth_set',g.claude_code_oauth_token_set);
+}
+async function saveGlobal(){
+  const p={ concurrency:+$('g_concurrency').value, max_budget_usd:+$('g_max_budget_usd').value,
+    default_model:$('g_default_model').value, default_consolidation_model:$('g_default_consolidation_model').value,
+    default_effort:$('g_default_effort').value, default_consolidation_effort:$('g_default_consolidation_effort').value,
+    default_tz:$('g_default_tz').value, default_rotate_turn_cap:+$('g_default_rotate_turn_cap').value,
+    default_memory_retention_days:+$('g_default_memory_retention_days').value, default_session_ttl_days:+$('g_default_session_ttl_days').value,
+    global_admin_user_ids:csv($('g_global_admin_user_ids').value) };
+  if($('g_webui_password').value) p.webui_password=$('g_webui_password').value;
+  if($('g_claude_code_oauth_token').value) p.claude_code_oauth_token=$('g_claude_code_oauth_token').value;
+  // bot_tokens are shown + pre-filled, so always send the full list (round-trips, no reset).
+  p.bot_tokens=$('g_bot_tokens').value.split('\n').map(x=>x.trim()).filter(Boolean);
+  try{ fillGlobal(await api('PATCH','/admin/api/global',p)); $('g_webui_password').value=''; $('g_claude_code_oauth_token').value='';
+    show($('msg'),'ok','Global settings saved.'); } catch(e){ show($('msg'),'err','Save failed: '+e.message); }
+}
+
+// --- MCP server registry (global) ---
+const BUILTIN_SERVERS=['memory','reminders'];
+let mcpServers=[], toolNames=[];
+function env2txt(e){ return Object.entries(e||{}).map(([k,v])=>k+'='+v).join('\n'); }
+function txt2env(t){ const o={}; t.split('\n').map(x=>x.trim()).filter(Boolean).forEach(l=>{ const i=l.indexOf('='); if(i>0) o[l.slice(0,i).trim()]=l.slice(i+1).trim(); }); return o; }
+function renderMcp(){
+  const el=$('mcplist'); el.innerHTML='';
+  if(!mcpServers.length){ el.innerHTML='<span class="hint">No external servers. Built-in memory &amp; reminders are always available.</span>'; }
+  mcpServers.forEach((s,i)=>{
+    const d=document.createElement('div'); d.className='card'; d.style.background='#0c0f13'; d.style.marginBottom='10px';
+    d.innerHTML=`<div class="row">`+
+      `<div><label>Name</label><input data-k="name" value="${escAttr(s.name)}" placeholder="weather"></div>`+
+      `<div><label>Command</label><input data-k="command" value="${escAttr(s.command)}" placeholder="npx"></div></div>`+
+      `<label>Args (space-separated)</label><input data-k="args" value="${escAttr((s.args||[]).join(' '))}" placeholder="-y @modelcontextprotocol/server-everything">`+
+      `<label>Env (KEY=value per line)</label><textarea data-k="env" rows="2" placeholder="API_KEY=...">${esc(env2txt(s.env))}</textarea>`+
+      `<div style="margin-top:8px"><button class="secondary" data-rm="${i}">Remove</button></div>`;
+    el.appendChild(d);
+  });
+  el.querySelectorAll('button[data-rm]').forEach(b=>b.onclick=()=>{ mcpServers=collectMcp(); mcpServers.splice(+b.dataset.rm,1); renderMcp(); });
+}
+function collectMcp(){
+  const out=[];
+  $('mcplist').querySelectorAll('.card').forEach(card=>{
+    const g=k=>card.querySelector(`[data-k="${k}"]`).value;
+    const name=g('name').trim(); if(!name) return;
+    out.push({ name, command:g('command').trim(), args:g('args').split(/\s+/).filter(Boolean), env:txt2env(g('env')) });
+  });
+  return out;
+}
+async function loadMcp(){ mcpServers=(await api('GET','/admin/api/mcp-servers'))||[]; renderMcp(); }
+async function saveMcp(){
+  try{ mcpServers=(await api('PUT','/admin/api/mcp-servers',collectMcp()))||[]; renderMcp();
+    show($('msg'),'ok','MCP servers saved (per-chat mcp.json regenerated).'); }
+  catch(e){ show($('msg'),'err','Save failed: '+e.message); }
+}
+
+// --- per-chat tools checklist ---
+function renderTools(all, admin){
+  const el=$('d_tools'); el.innerHTML='';
+  toolNames=BUILTIN_SERVERS.concat(mcpServers.map(s=>s.name));
+  toolNames.forEach((n,i)=>{
+    const state=(admin||[]).includes(n)?'admin':((all||[]).includes(n)?'all':'off');
+    const row=document.createElement('div'); row.style.margin='6px 0';
+    row.innerHTML=`<b style="color:var(--fg)">${esc(n)}</b>`+
+      ['off','all','admin'].map(v=>`<label style="display:inline-block;width:auto;margin-left:12px;color:var(--muted)">`+
+        `<input type="radio" name="tool_${i}" value="${v}" ${state===v?'checked':''} style="width:auto;margin-right:4px">`+
+        ({off:'off','all':'all users',admin:'admins only'})[v]+`</label>`).join('');
+    el.appendChild(row);
+  });
+}
+function collectTools(){
+  const all=[], admin=[];
+  toolNames.forEach((n,i)=>{ const r=document.querySelector(`input[name="tool_${i}"]:checked`); const v=r?r.value:'off';
+    if(v==='all') all.push(n); else if(v==='admin') admin.push(n); });
+  return {all, admin};
+}
+
+// --- chat list ---
+async function loadChats(){
+  const list = await api('GET','/admin/api/chats');
+  if(!list.length){ $('chatlist').innerHTML='<span class="hint">No chats yet. Add the bot to a group or DM it, then refresh.</span>'; return; }
+  let h='<table><tr><th>chat_id</th><th>name</th><th>type</th><th>enabled</th><th>token</th></tr>';
+  for(const c of list){ h+=`<tr class="chat" data-id="${c.chat_id}"><td>${c.chat_id}</td><td>${esc(c.name||'')}</td><td>${c.type||''}</td>`+
+    `<td><span class="pill ${c.enabled?'on':'off'}">${c.enabled?'on':'off'}</span></td><td>${c.has_token?'✓':'—'}</td></tr>`; }
+  h+='</table>'; $('chatlist').innerHTML=h;
+  document.querySelectorAll('tr.chat').forEach(tr=>tr.onclick=()=>openChat(tr.dataset.id));
+}
+function esc(s){ return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// --- chat detail ---
+let curChat=null, curChatCfg=null;
+async function openChat(id){
+  curChat=id;
+  const d=await api('GET','/admin/api/chats/'+id); const c=d.config;
+  curChatCfg=c; // keep the full config so non-editable fields (name/type/…) round-trip on save
+  $('d_title').textContent='Chat '+id+(c.name?(' — '+c.name):'');
+  $('d_enabled').value=String(!!c.enabled); $('d_bot_token').value=c.bot_token||'';
+  fillModelSelect('d_model',c.model); fillModelSelect('d_consolidation_model',c.consolidation_model); fillEffortSelect('d_effort',c.effort,'(default)'); fillEffortSelect('d_consolidation_effort',c.consolidation_effort,'(default)'); $('d_tz').value=c.tz||'';
+  $('d_group_response_mode').value=c.group_response_mode||'mention'; $('d_record_group_chatter').value=String(!!c.record_group_chatter);
+  $('d_images_enabled').value=String(!!c.images_enabled);
+  $('d_rotate_turn_cap').value=c.rotate_turn_cap||0; $('d_memory_retention_days').value=c.memory_retention_days||0; $('d_session_ttl_days').value=c.session_ttl_days||0;
+  $('d_admin_user_ids').value=ids2csv(c.admin_user_ids); $('d_persona').value=d.persona||'';
+  renderTools(c.all_allowed_tools, c.admin_allowed_tools);
+  $('dash').classList.add('hidden'); $('detail').classList.remove('hidden');
+}
+async function saveChat(){
+  // Start from the full loaded config so fields without form inputs (name, type,
+  // raw_retention_days, max_budget_usd) are preserved, then overlay the editable ones.
+  const cfg=Object.assign({}, curChatCfg, {
+    enabled:$('d_enabled').value==='true', bot_token:$('d_bot_token').value,
+    model:$('d_model').value, consolidation_model:$('d_consolidation_model').value, effort:$('d_effort').value, consolidation_effort:$('d_consolidation_effort').value, tz:$('d_tz').value,
+    group_response_mode:$('d_group_response_mode').value, record_group_chatter:$('d_record_group_chatter').value==='true',
+    images_enabled:$('d_images_enabled').value==='true',
+    rotate_turn_cap:+$('d_rotate_turn_cap').value, memory_retention_days:+$('d_memory_retention_days').value, session_ttl_days:+$('d_session_ttl_days').value,
+    admin_user_ids:csv($('d_admin_user_ids').value) });
+  const t=collectTools(); cfg.all_allowed_tools=t.all; cfg.admin_allowed_tools=t.admin;
+  try{ await api('PATCH','/admin/api/chats/'+curChat,{config:cfg, persona:$('d_persona').value});
+    show($('msg'),'ok','Chat saved (applied live).'); back(); } catch(e){ show($('msg'),'err','Save failed: '+e.message); }
+}
+function back(){ $('detail').classList.add('hidden'); $('dash').classList.remove('hidden'); loadChats(); }
+
+async function enter(){
+  $('login').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
+  fillGlobal(await api('GET','/admin/api/global')); await loadMcp(); loadChats();
+}
+
+$('loginBtn').onclick=async()=>{ try{ await api('POST','/admin/login',{password:$('pw').value}); await enter(); } catch(e){ show($('loginMsg'),'err','Login failed: '+e.message); } };
+$('pw').addEventListener('keydown',e=>{ if(e.key==='Enter') $('loginBtn').click(); });
+$('saveGlobal').onclick=saveGlobal; $('saveChat').onclick=saveChat; $('back').onclick=back;
+$('addMcp').onclick=()=>{ mcpServers=collectMcp(); mcpServers.push({name:'',command:'',args:[],env:{}}); renderMcp(); };
+$('saveMcp').onclick=saveMcp;
+$('logout').onclick=async()=>{ await api('POST','/admin/logout'); location.reload(); };
+api('GET','/admin/api/global').then(enter).catch(()=>{});
+</script>
+</body>
+</html>

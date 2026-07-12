@@ -1,0 +1,11 @@
+.git
+.gitignore
+*.md
+!go.mod
+data/
+bin/
+*.log
+secrets.yaml
+.env
+Dockerfile
+.dockerignore

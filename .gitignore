@@ -1,0 +1,35 @@
+# Compiled binaries and build output
+bin/
+/assistant
+/assistant-linux
+*.exe
+*.tar.gz
+
+# Go
+*.test
+*.out
+coverage.out
+vendor/
+
+# Runtime data and secrets
+/data/
+/data_old/
+secrets.yaml
+sessions.json
+.env
+*.log
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
