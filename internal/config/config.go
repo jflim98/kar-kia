@@ -19,6 +19,19 @@ const (
 	TypeGroup = "group"
 )
 
+// ModelAliases are the model choices offered in the web UI dropdowns (single source of truth).
+// The claude CLI also accepts a full model name (e.g. "claude-opus-4-8"); a saved value outside
+// this list is preserved by the UI rather than reset. Order is lightest → heaviest.
+var ModelAliases = []string{"haiku", "sonnet", "opus", "fable"}
+
+// EffortLevels are the reasoning-effort choices the claude CLI accepts (--effort), and the single
+// source of truth for both the web UI dropdown and the runner's validation. An empty value means
+// "inherit the CLI default" (no --effort passed) and is not listed here.
+var EffortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+
+// IsValidEffort reports whether s is a recognized (non-empty) effort level.
+func IsValidEffort(s string) bool { return slices.Contains(EffortLevels, s) }
+
 // Built-in MCP server names and their HTTP paths on the daemon's MCP endpoint. These are the
 // always-available servers (no subprocess); external servers come from the registry. The map
 // is the single source of truth shared by the MCP server (which paths to serve) and the
@@ -74,7 +87,8 @@ type Global struct {
 	// Defaults applied when a new chat is created / a chat field is empty.
 	DefaultModel               string `yaml:"default_model" json:"default_model"`
 	DefaultConsolidationModel  string `yaml:"default_consolidation_model" json:"default_consolidation_model"`
-	DefaultEffort              string `yaml:"default_effort" json:"default_effort"` // reasoning effort: "" (CLI default), low, medium, high, xhigh, max
+	DefaultEffort              string `yaml:"default_effort" json:"default_effort"`                             // conversational reasoning effort: "" (CLI default), low, medium, high, xhigh, max
+	DefaultConsolidationEffort string `yaml:"default_consolidation_effort" json:"default_consolidation_effort"` // effort for background consolidation (same values; "" => CLI default)
 	DefaultTZ                  string `yaml:"default_tz" json:"default_tz"`
 	DefaultMemoryRetentionDays int    `yaml:"default_memory_retention_days" json:"default_memory_retention_days"`
 	DefaultRawRetentionDays    int    `yaml:"default_raw_retention_days" json:"default_raw_retention_days"`

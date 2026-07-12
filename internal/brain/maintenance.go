@@ -12,7 +12,8 @@ import (
 func (b *Brain) Summarize(ctx context.Context, instruction string) (string, error) {
 	chat := b.chat.Resolved(b.global.Get())
 	res, err := b.runner.Run(ctx, runInput{
-		Model: chat.ConsolidationModel,
+		Model:  chat.ConsolidationModel,
+		Effort: chat.ConsolidationEffort,
 		// No AllowedTools + DisableMCP => no MCP servers and nothing allow-listed, so
 		// --permission-mode default denies every tool (plus --disallowedTools). Pure text in/out.
 		DisableMCP:   true,

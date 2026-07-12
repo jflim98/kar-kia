@@ -17,10 +17,16 @@ type globalView struct {
 	DefaultModel               string  `json:"default_model"`
 	DefaultConsolidationModel  string  `json:"default_consolidation_model"`
 	DefaultEffort              string  `json:"default_effort"`
+	DefaultConsolidationEffort string  `json:"default_consolidation_effort"`
 	DefaultTZ                  string  `json:"default_tz"`
 	DefaultMemoryRetentionDays int     `json:"default_memory_retention_days"`
 	DefaultSessionTTLDays      int     `json:"default_session_ttl_days"`
 	DefaultRotateTurnCap       int     `json:"default_rotate_turn_cap"`
+
+	// Static UI metadata (read-only): the choices the model/effort dropdowns are built from, so
+	// the option lists live in Go (config.ModelAliases / config.EffortLevels) as the single source.
+	ModelOptions  []string `json:"model_options"`
+	EffortOptions []string `json:"effort_options"`
 
 	// Bot tokens are shown (so edits round-trip and don't reset). The webui password and
 	// oauth token stay write-only (more sensitive) — only their presence is reported.
@@ -36,6 +42,7 @@ type globalPatch struct {
 	DefaultModel               *string  `json:"default_model"`
 	DefaultConsolidationModel  *string  `json:"default_consolidation_model"`
 	DefaultEffort              *string  `json:"default_effort"`
+	DefaultConsolidationEffort *string  `json:"default_consolidation_effort"`
 	DefaultTZ                  *string  `json:"default_tz"`
 	DefaultMemoryRetentionDays *int     `json:"default_memory_retention_days"`
 	DefaultSessionTTLDays      *int     `json:"default_session_ttl_days"`
@@ -58,10 +65,13 @@ func (s *Server) handleGlobal(w http.ResponseWriter, r *http.Request) {
 			DefaultModel:               c.DefaultModel,
 			DefaultConsolidationModel:  c.DefaultConsolidationModel,
 			DefaultEffort:              c.DefaultEffort,
+			DefaultConsolidationEffort: c.DefaultConsolidationEffort,
 			DefaultTZ:                  c.DefaultTZ,
 			DefaultMemoryRetentionDays: c.DefaultMemoryRetentionDays,
 			DefaultSessionTTLDays:      c.DefaultSessionTTLDays,
 			DefaultRotateTurnCap:       c.DefaultRotateTurnCap,
+			ModelOptions:               config.ModelAliases,
+			EffortOptions:              config.EffortLevels,
 			BotTokens:                  sec.BotTokens,
 			WebUIPasswordSet:           sec.WebUIPassword != "",
 			OAuthTokenSet:              sec.ClaudeCodeOAuthToken != "",
@@ -81,6 +91,7 @@ func (s *Server) handleGlobal(w http.ResponseWriter, r *http.Request) {
 			setStr(&c.DefaultModel, p.DefaultModel)
 			setStr(&c.DefaultConsolidationModel, p.DefaultConsolidationModel)
 			setStr(&c.DefaultEffort, p.DefaultEffort)
+			setStr(&c.DefaultConsolidationEffort, p.DefaultConsolidationEffort)
 			setStr(&c.DefaultTZ, p.DefaultTZ)
 			setInt(&c.DefaultMemoryRetentionDays, p.DefaultMemoryRetentionDays)
 			setInt(&c.DefaultSessionTTLDays, p.DefaultSessionTTLDays)
