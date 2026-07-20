@@ -14,6 +14,7 @@ type globalView struct {
 	Concurrency                int     `json:"concurrency"`
 	MaxBudgetUSD               float64 `json:"max_budget_usd"`
 	GlobalAdminUserIDs         []int64 `json:"global_admin_user_ids"`
+	BlacklistedUserIDs         []int64 `json:"blacklisted_user_ids"`
 	DefaultModel               string  `json:"default_model"`
 	DefaultConsolidationModel  string  `json:"default_consolidation_model"`
 	DefaultEffort              string  `json:"default_effort"`
@@ -39,6 +40,7 @@ type globalPatch struct {
 	Concurrency                *int     `json:"concurrency"`
 	MaxBudgetUSD               *float64 `json:"max_budget_usd"`
 	GlobalAdminUserIDs         *[]int64 `json:"global_admin_user_ids"`
+	BlacklistedUserIDs         *[]int64 `json:"blacklisted_user_ids"`
 	DefaultModel               *string  `json:"default_model"`
 	DefaultConsolidationModel  *string  `json:"default_consolidation_model"`
 	DefaultEffort              *string  `json:"default_effort"`
@@ -62,6 +64,7 @@ func (s *Server) handleGlobal(w http.ResponseWriter, r *http.Request) {
 			Concurrency:                c.Concurrency,
 			MaxBudgetUSD:               c.MaxBudgetUSD,
 			GlobalAdminUserIDs:         c.GlobalAdminUserIDs,
+			BlacklistedUserIDs:         c.BlacklistedUserIDs,
 			DefaultModel:               c.DefaultModel,
 			DefaultConsolidationModel:  c.DefaultConsolidationModel,
 			DefaultEffort:              c.DefaultEffort,
@@ -87,6 +90,9 @@ func (s *Server) handleGlobal(w http.ResponseWriter, r *http.Request) {
 			setFloat(&c.MaxBudgetUSD, p.MaxBudgetUSD)
 			if p.GlobalAdminUserIDs != nil {
 				c.GlobalAdminUserIDs = *p.GlobalAdminUserIDs
+			}
+			if p.BlacklistedUserIDs != nil {
+				c.BlacklistedUserIDs = *p.BlacklistedUserIDs
 			}
 			setStr(&c.DefaultModel, p.DefaultModel)
 			setStr(&c.DefaultConsolidationModel, p.DefaultConsolidationModel)

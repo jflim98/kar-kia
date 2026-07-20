@@ -58,6 +58,7 @@
           <div><label>Default session TTL (days)</label><input id="g_default_session_ttl_days" type="number"></div>
         </div>
         <label>Global admin user IDs (comma-separated)</label><input id="g_global_admin_user_ids">
+        <label>Blacklisted user IDs (comma-separated) <span class="hint">— ignored in ALL chats; their messages never reach the assistant</span></label><input id="g_blacklisted_user_ids">
 
         <h2>Secrets <span class="hint">(write-only; leave blank to keep)</span></h2>
         <label>Web UI password <span id="g_pw_set" class="pill"></span></label><input id="g_webui_password" type="password" placeholder="•••••• (unchanged)">
@@ -67,7 +68,7 @@
       </div>
 
       <div class="card">
-        <h2>MCP servers <span class="hint">— external tools (local stdio). Built-in "memory" &amp; "reminders" are always available. Enable per chat below.</span></h2>
+        <h2>MCP servers <span class="hint">— external tools (local stdio). Built-in "memory", "reminders" &amp; "moderation" are always available. Enable per chat below.</span></h2>
         <div id="mcplist"></div>
         <div style="margin-top:10px"><button class="secondary" id="addMcp">+ Add server</button> <button id="saveMcp">Save servers</button></div>
       </div>
@@ -98,6 +99,7 @@
           <div><label>Session TTL (days)</label><input id="d_session_ttl_days" type="number"></div>
         </div>
         <label>Cron-admin user IDs (comma-separated)</label><input id="d_admin_user_ids">
+        <label>Blacklisted user IDs (comma-separated) <span class="hint">— ignored in THIS chat only; the assistant may add ids here via the moderation tool</span></label><input id="d_blacklisted_user_ids">
         <h2>Tools <span class="hint">— which MCP servers this chat may use, and for whom</span></h2>
         <div id="d_tools" class="hint">loading…</div>
         <h2>Persona</h2>
@@ -151,6 +153,7 @@ function fillGlobal(g){
   $('g_default_tz').value=g.default_tz; $('g_default_rotate_turn_cap').value=g.default_rotate_turn_cap;
   $('g_default_memory_retention_days').value=g.default_memory_retention_days; $('g_default_session_ttl_days').value=g.default_session_ttl_days;
   $('g_global_admin_user_ids').value=ids2csv(g.global_admin_user_ids);
+  $('g_blacklisted_user_ids').value=ids2csv(g.blacklisted_user_ids);
   $('g_bot_tokens').value=(g.bot_tokens||[]).join('\n');
   pill('g_pw_set',g.webui_password_set); pill('g_tok_count',(g.bot_tokens||[]).length>0,(g.bot_tokens||[]).length+' set'); pill('g_oauth_set',g.claude_code_oauth_token_set);
 }
@@ -160,7 +163,8 @@ async function saveGlobal(){
     default_effort:$('g_default_effort').value, default_consolidation_effort:$('g_default_consolidation_effort').value,
     default_tz:$('g_default_tz').value, default_rotate_turn_cap:+$('g_default_rotate_turn_cap').value,
     default_memory_retention_days:+$('g_default_memory_retention_days').value, default_session_ttl_days:+$('g_default_session_ttl_days').value,
-    global_admin_user_ids:csv($('g_global_admin_user_ids').value) };
+    global_admin_user_ids:csv($('g_global_admin_user_ids').value),
+    blacklisted_user_ids:csv($('g_blacklisted_user_ids').value) };
   if($('g_webui_password').value) p.webui_password=$('g_webui_password').value;
   if($('g_claude_code_oauth_token').value) p.claude_code_oauth_token=$('g_claude_code_oauth_token').value;
   // bot_tokens are shown + pre-filled, so always send the full list (round-trips, no reset).
@@ -170,13 +174,13 @@ async function saveGlobal(){
 }
 
 // --- MCP server registry (global) ---
-const BUILTIN_SERVERS=['memory','reminders'];
+const BUILTIN_SERVERS=['memory','reminders','moderation'];
 let mcpServers=[], toolNames=[];
 function env2txt(e){ return Object.entries(e||{}).map(([k,v])=>k+'='+v).join('\n'); }
 function txt2env(t){ const o={}; t.split('\n').map(x=>x.trim()).filter(Boolean).forEach(l=>{ const i=l.indexOf('='); if(i>0) o[l.slice(0,i).trim()]=l.slice(i+1).trim(); }); return o; }
 function renderMcp(){
   const el=$('mcplist'); el.innerHTML='';
-  if(!mcpServers.length){ el.innerHTML='<span class="hint">No external servers. Built-in memory &amp; reminders are always available.</span>'; }
+  if(!mcpServers.length){ el.innerHTML='<span class="hint">No external servers. Built-in memory, reminders &amp; moderation are always available.</span>'; }
   mcpServers.forEach((s,i)=>{
     const d=document.createElement('div'); d.className='card'; d.style.background='#0c0f13'; d.style.marginBottom='10px';
     d.innerHTML=`<div class="row">`+
@@ -250,7 +254,7 @@ async function openChat(id){
   $('d_group_response_mode').value=c.group_response_mode||'mention'; $('d_record_group_chatter').value=String(!!c.record_group_chatter);
   $('d_images_enabled').value=String(!!c.images_enabled);
   $('d_rotate_turn_cap').value=c.rotate_turn_cap||0; $('d_memory_retention_days').value=c.memory_retention_days||0; $('d_session_ttl_days').value=c.session_ttl_days||0;
-  $('d_admin_user_ids').value=ids2csv(c.admin_user_ids); $('d_persona').value=d.persona||'';
+  $('d_admin_user_ids').value=ids2csv(c.admin_user_ids); $('d_blacklisted_user_ids').value=ids2csv(c.blacklisted_user_ids); $('d_persona').value=d.persona||'';
   renderTools(c.all_allowed_tools, c.admin_allowed_tools);
   $('dash').classList.add('hidden'); $('detail').classList.remove('hidden');
 }
@@ -263,7 +267,7 @@ async function saveChat(){
     group_response_mode:$('d_group_response_mode').value, record_group_chatter:$('d_record_group_chatter').value==='true',
     images_enabled:$('d_images_enabled').value==='true',
     rotate_turn_cap:+$('d_rotate_turn_cap').value, memory_retention_days:+$('d_memory_retention_days').value, session_ttl_days:+$('d_session_ttl_days').value,
-    admin_user_ids:csv($('d_admin_user_ids').value) });
+    admin_user_ids:csv($('d_admin_user_ids').value), blacklisted_user_ids:csv($('d_blacklisted_user_ids').value) });
   const t=collectTools(); cfg.all_allowed_tools=t.all; cfg.admin_allowed_tools=t.admin;
   try{ await api('PATCH','/admin/api/chats/'+curChat,{config:cfg, persona:$('d_persona').value});
     show($('msg'),'ok','Chat saved (applied live).'); back(); } catch(e){ show($('msg'),'err','Save failed: '+e.message); }

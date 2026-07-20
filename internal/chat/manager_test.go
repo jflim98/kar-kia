@@ -68,11 +68,75 @@ func TestLoadChatConfigBackfillsAllowListsForDisplay(t *testing.T) {
 	if !ok {
 		t.Fatal("chat should load")
 	}
-	if !slices.Equal(got.AllAllowedTools, []string{config.ServerMemory}) {
+	if !slices.Equal(got.AllAllowedTools, []string{config.ServerMemory, config.ServerModeration}) {
 		t.Fatalf("all-list should show defaults for a legacy chat, got %v", got.AllAllowedTools)
 	}
 	if !slices.Equal(got.AdminAllowedTools, []string{config.ServerReminders}) {
 		t.Fatalf("admin-list should show defaults for a legacy chat, got %v", got.AdminAllowedTools)
+	}
+}
+
+func TestBlacklistProtectsAdminsAndPersists(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Update(func(g *config.Global, _ *config.Secrets) {
+		g.GlobalAdminUserIDs = []int64{1}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := New(dir, cfg, nil, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(m.chatDir(-42), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.chatCfgPath(-42), []byte("enabled: true\nadmin_user_ids: [7]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Inactive chat, admins, global admins, the DM owner, and id 0 are all refused.
+	refused := []struct {
+		name           string
+		chatID, target int64
+	}{
+		{"inactive chat", 999, 5},
+		{"chat admin", -42, 7},
+		{"global admin", -42, 1},
+		{"zero id", -42, 0},
+	}
+	for _, c := range refused {
+		if _, err := m.Blacklist(c.chatID, c.target, "x"); err == nil {
+			t.Fatalf("%s: Blacklist(%d, %d) should be refused", c.name, c.chatID, c.target)
+		}
+	}
+
+	// A regular user is added, persisted to disk, and live in the reloaded tenant.
+	if _, err := m.Blacklist(-42, 99, "spam"); err != nil {
+		t.Fatalf("Blacklist: %v", err)
+	}
+	onDisk, ok := m.LoadChatConfig(-42)
+	if !ok || !slices.Contains(onDisk.BlacklistedUserIDs, 99) {
+		t.Fatalf("blacklist not persisted: %v", onDisk.BlacklistedUserIDs)
+	}
+	tn, ok := m.get(-42)
+	if !ok || !slices.Contains(tn.cfg.BlacklistedUserIDs, 99) {
+		t.Fatalf("tenant not reloaded with blacklist: %+v", tn)
+	}
+
+	// Blacklisting again is a no-op, not a duplicate.
+	if _, err := m.Blacklist(-42, 99, "spam again"); err != nil {
+		t.Fatalf("repeat Blacklist: %v", err)
+	}
+	onDisk, _ = m.LoadChatConfig(-42)
+	if n := len(onDisk.BlacklistedUserIDs); n != 1 {
+		t.Fatalf("want 1 blacklist entry, got %d: %v", n, onDisk.BlacklistedUserIDs)
 	}
 }
 

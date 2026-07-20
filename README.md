@@ -53,7 +53,7 @@ single small Go binary (plus the `claude` CLI) on a 1 GB Debian box.
   chats/<chat_id>/
     chat.yaml          enabled, bot_token, model, tz, admin_user_ids, all/admin_allowed_tools, …
     persona.md
-    mcp.json           generated: built-in memory/reminders + this chat's enabled externals (0600)
+    mcp.json           generated: built-in memory/reminders/moderation + this chat's enabled externals (0600)
     schedules.json   sessions.json
     memory/
       long_term_memory.md
@@ -80,15 +80,21 @@ all memory writes. Global `config.yaml`/`secrets.yaml` are edited via the web UI
   - A nightly **1am** job per chat (or `assistant consolidate`) compacts the day's raw
     log into a dated note + index gist, and ages old notes into long-term memory. The
     daemon does all file I/O; Claude only summarizes the text it's handed.
-- **MCP tools, per chat.** Two built-in servers (loopback HTTP, no subprocess):
+- **MCP tools, per chat.** Three built-in servers (loopback HTTP, no subprocess):
   - **`memory`** — `recall_memory` (keyword/date search over older notes, long-term, and
     profiles; the daemon does the I/O) and `propose_memory`.
   - **`reminders`** — `schedule_reminder` / `list_reminders` / `cancel_reminder`; fired
     reminders run in that chat's session, delivered via its token.
+  - **`moderation`** — `blacklist_user`; lets the assistant autonomously blacklist a
+    persistently abusive/spamming user from that chat (admins and the DM owner can never
+    be blacklisted; only the dashboard can undo it).
 
   Each chat picks which servers are available, and to whom, via two allow-lists
-  (`all_allowed_tools` / `admin_allowed_tools`). Defaults: `memory` for everyone,
-  `reminders` for cron-admins.
+  (`all_allowed_tools` / `admin_allowed_tools`). Defaults: `memory` + `moderation` for
+  everyone, `reminders` for cron-admins.
+- **Blacklists.** Per-chat (`blacklisted_user_ids` in chat.yaml) and global (same key in
+  config.yaml, all chats) — both editable in the web UI. A blacklisted sender's messages
+  are dropped at the gateway edge: never recorded, never answered, never sent to claude.
 - **External MCP servers (local stdio).** Operators register servers (command + args + env)
   in the web UI **or** via the `assistant mcp` CLI; per chat, add them to either allow-list.
   Each `claude` invocation spawns only that chat's enabled stdio servers (mind RAM on small
@@ -275,9 +281,10 @@ reply errors. (2) Turn **BotFather privacy mode OFF** for group messages, and se
 | `concurrency` | max concurrent `claude -p` across all chats (restart to change) |
 | `max_budget_usd` | per-call spend cap (0 = off) |
 | `global_admin_user_ids` | operators; implicitly cron-admins in every chat |
+| `blacklisted_user_ids` | Telegram user ids ignored in ALL chats (dropped before claude) |
 | `default_model` / `default_consolidation_model` / `default_tz` | seeded into new chats |
 | `default_memory_retention_days` / `default_raw_retention_days` / `default_session_ttl_days` / `default_rotate_turn_cap` | new-chat defaults |
-| `default_all_allowed_tools` / `default_admin_allowed_tools` | new-chat tool allow-lists (default `[memory]` / `[reminders]`) |
+| `default_all_allowed_tools` / `default_admin_allowed_tools` | new-chat tool allow-lists (default `[memory, moderation]` / `[reminders]`) |
 | `webui_addr` / `mcp_addr` | admin UI / internal MCP listen addresses |
 | secrets: `webui_password`, `bot_tokens`, `claude_code_oauth_token` | env: `WEBUI_PASSWORD`, `BOT_TOKENS`, `CLAUDE_CODE_OAUTH_TOKEN` |
 | `mcp_servers.yaml` | registered external MCP servers (managed in the web UI; 0600) |
@@ -290,9 +297,10 @@ reply errors. (2) Turn **BotFather privacy mode OFF** for group messages, and se
 | `bot_token` | the bot used to send here (must be a bot that's in this chat) |
 | `model` / `consolidation_model` / `tz` | overrides; empty = global default |
 | `admin_user_ids` | this chat's cron-admins (may use admin-only servers) |
+| `blacklisted_user_ids` | Telegram user ids ignored in THIS chat; the assistant may append via `blacklist_user` |
 | `group_response_mode` | `mention` / `reply` / `all` |
 | `record_group_chatter` | `false` = act only on @mentions/replies |
-| `all_allowed_tools` / `admin_allowed_tools` | MCP servers available to everyone / cron-admins (names: `memory`, `reminders`, + registered externals) |
+| `all_allowed_tools` / `admin_allowed_tools` | MCP servers available to everyone / cron-admins (names: `memory`, `reminders`, `moderation`, + registered externals) |
 | `images_enabled` | accept photos for vision (default off) |
 | `max_budget_usd` | per-call spend cap for this chat (overrides the global default; 0 = off) |
 | `memory_retention_days` / `raw_retention_days` / `session_ttl_days` / `rotate_turn_cap` | per-chat tuning (`rotate_turn_cap: 0` = never) |
@@ -319,7 +327,7 @@ assistant mcp rm everything          # remove one
 
 CLI edits write `mcp_servers.yaml` and need a **daemon restart** to apply (the web UI applies
 live). Only local stdio entries are imported; HTTP/SSE servers and the reserved `memory` /
-`reminders` names are skipped. `claude mcp add` registers with *Claude Code*, not the
+`reminders` / `moderation` names are skipped. `claude mcp add` registers with *Claude Code*, not the
 assistant (we run `--strict-mcp-config`), which is exactly why `import` exists.
 
 ## Development

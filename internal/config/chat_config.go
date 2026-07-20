@@ -22,10 +22,16 @@ type Chat struct {
 	TZ                  string `yaml:"tz" json:"tz"`
 
 	// AdminUserIDs are this chat's cron-admins (may schedule reminders/jobs here).
-	AdminUserIDs       []int64 `yaml:"admin_user_ids" json:"admin_user_ids"`
-	GroupResponseMode  string  `yaml:"group_response_mode" json:"group_response_mode"`
-	RecordGroupChatter bool    `yaml:"record_group_chatter" json:"record_group_chatter"`
-	ImagesEnabled      bool    `yaml:"images_enabled" json:"images_enabled"` // accept photos (vision); default off
+	AdminUserIDs []int64 `yaml:"admin_user_ids" json:"admin_user_ids"`
+
+	// BlacklistedUserIDs (Telegram user ids) are dropped in THIS chat only: never recorded,
+	// never sent to claude. Editable in the dashboard; the assistant may also append via the
+	// moderation MCP tool. The global blacklist (Global.BlacklistedUserIDs) applies on top.
+	BlacklistedUserIDs []int64 `yaml:"blacklisted_user_ids" json:"blacklisted_user_ids"`
+
+	GroupResponseMode  string `yaml:"group_response_mode" json:"group_response_mode"`
+	RecordGroupChatter bool   `yaml:"record_group_chatter" json:"record_group_chatter"`
+	ImagesEnabled      bool   `yaml:"images_enabled" json:"images_enabled"` // accept photos (vision); default off
 
 	MemoryRetentionDays int     `yaml:"memory_retention_days" json:"memory_retention_days"`
 	RawRetentionDays    int     `yaml:"raw_retention_days" json:"raw_retention_days"`
@@ -127,6 +133,12 @@ func (c Chat) ServersFor(isAdmin bool) []string {
 // EnabledServers is the union of both allow-lists: the MCP servers loaded into this chat's
 // mcp.json (which connects every server any speaker might use).
 func (c Chat) EnabledServers() []string { return c.ServersFor(true) }
+
+// IsBlacklisted reports whether a user's messages must be dropped in this chat: on the
+// chat's local blacklist or (via the global config passed in) the global one.
+func (c Chat) IsBlacklisted(g Global, userID int64) bool {
+	return g.IsBlacklisted(userID) || slices.Contains(c.BlacklistedUserIDs, userID)
+}
 
 // IsCronAdmin reports whether a user may manage crons in this chat (chat-admin or, via
 // the global config passed in, a global admin).

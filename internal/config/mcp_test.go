@@ -40,11 +40,11 @@ func TestMCPServerRegistryRoundTrip(t *testing.T) {
 }
 
 func TestResolvedAllowListBackfill(t *testing.T) {
-	g := DefaultGlobal() // all=[memory], admin=[reminders]
+	g := DefaultGlobal() // all=[memory, moderation], admin=[reminders]
 
 	// nil (never configured) -> backfilled to defaults.
 	got := Chat{}.Resolved(g)
-	if !slices.Equal(got.AllAllowedTools, []string{ServerMemory}) {
+	if !slices.Equal(got.AllAllowedTools, []string{ServerMemory, ServerModeration}) {
 		t.Fatalf("nil all-list should backfill to defaults, got %v", got.AllAllowedTools)
 	}
 	if !slices.Equal(got.AdminAllowedTools, []string{ServerReminders}) {
