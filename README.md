@@ -105,21 +105,128 @@ all memory writes. Global `config.yaml`/`secrets.yaml` are edited via the web UI
   chat to set its persona, model, token, cron-admins, tool allow-lists, and enable it —
   applied live.
 
-## Quick start (local, macOS/Linux)
+## Quickstart
 
-You need Go 1.25+ and the `claude` CLI **logged in** (`claude` once, interactively).
+Five steps: log in to Claude Code, build, scaffold the data dir, edit two files, run.
+
+### 0. Install Claude Code and log in — do this first
+
+This app ships **no API key of its own**. Every reply shells out to `claude -p`, so all
+authentication comes from the `claude` CLI's own login. Nothing works until this is done.
+
+```sh
+npm install -g @anthropic-ai/claude-code    # needs Node 18+
+
+claude              # opens the interactive REPL
+#   /login          <- type this inside the REPL; it opens a browser, sign in there
+#   /exit
+
+claude --version                # CLI is on PATH
+echo hi | claude -p             # auth works — must print a reply, not an error
+```
+
+`/login` stores your subscription credentials under `~/.claude`. **If `echo hi | claude -p`
+fails here, stop and fix it** — every downstream symptom ("bot never replies", "auth error"
+in the logs) traces back to this step.
+
+> **Headless server?** There's no browser to complete `/login`. Log in on your laptop as
+> above, then run `claude setup-token` there to mint a long-lived token, and put that token
+> in the server's `secrets.yaml` as `claude_code_oauth_token` (step 2).
+
+### 1. Build
+
+Local dev (needs Go 1.25+):
 
 ```sh
 go build -o assistant ./cmd/assistant
-./assistant init --data-dir ./data
-# edit ./data/secrets.yaml  -> webui_password, bot_tokens: [ "123:ABC..." ]
-./assistant run --data-dir ./data
-# open http://127.0.0.1:8765, log in, set global_admin_user_ids, then:
-#   DM the bot (or @mention it in a group) -> it appears in the dashboard -> open it,
-#   set persona/model + its bot_token, and Enable.
 ```
 
-Locally no Claude token is needed — `claude -p` uses your existing login.
+For a cloud server, use `build.sh` — it cross-compiles a **static** Linux binary (CGO off,
+so no glibc dependency) and packages it as a tarball:
+
+```sh
+./build.sh                  # linux/amd64 (default — most GCP/EC2 VMs)
+GOARCH=arm64 ./build.sh     # linux/arm64 (GCP T2A, AWS Graviton, Ampere)
+```
+
+Check which you need with `uname -m` on the VM: `x86_64` → amd64, `aarch64` → arm64. It
+produces two files next to the script:
+
+| file | use |
+| --- | --- |
+| `assistant-linux` | the bare binary |
+| `assistant-linux.tar.gz` | the same binary, compressed with the exec bit preserved |
+
+Ship and unpack the tarball (the exec bit survives, so no `chmod` needed — this is why you
+should prefer it over copying the raw binary from Windows/NTFS, where tar can't read one):
+
+```sh
+gcloud compute scp assistant-linux.tar.gz VM_NAME:~/ --zone=YOUR_ZONE
+gcloud compute ssh VM_NAME --zone=YOUR_ZONE
+tar -xzf assistant-linux.tar.gz
+sudo mv assistant-linux /usr/local/bin/assistant
+```
+
+### 2. Scaffold and configure
+
+```sh
+./assistant init --data-dir ./data
+```
+
+That writes three global files into the data dir. **You only need to edit the first one to
+get running** — the rest have working defaults:
+
+| file | mode | what to set |
+| --- | --- | --- |
+| `secrets.yaml` | 0600 | **`webui_password`** (admin UI login) and **`bot_tokens`** (from @BotFather). On a headless server also `claude_code_oauth_token` — otherwise leave it **commented out**. |
+| `config.yaml` | 0644 | Optional. `global_admin_user_ids`, `concurrency` (keep at 1–2 on a 1 GB box), `default_model`, `default_tz`. |
+| `mcp_servers.yaml` | 0600 | Optional. External MCP servers; starts empty, managed from the web UI. |
+
+A minimal `secrets.yaml` for local use:
+
+```yaml
+webui_password: "choose-a-strong-one"
+bot_tokens: ["123456:ABC-DEF..."]
+# claude_code_oauth_token: ""   # leave commented locally — your /login is used
+```
+
+> ⚠️ Setting `claude_code_oauth_token` to a stale or placeholder value **overrides** a
+> working `/login` and makes every reply fail with an auth error. Leave it commented unless
+> it holds a real token from `claude setup-token`.
+
+Per-chat settings (persona, model, tools, cron-admins) are **not** files you hand-edit —
+they're created for you when a chat first appears, and edited in the web UI (step 4).
+
+### 3. Run
+
+```sh
+./assistant run --data-dir ./data
+```
+
+Or use `run.sh`, which finds the binary and data dir for you, and auto-scaffolds on first
+run (`./data` if it exists, else `~/asst-data`):
+
+```sh
+./run.sh                    # auto-detect
+./run.sh /path/to/data      # explicit data dir
+```
+
+On a server, run it under systemd instead — see
+[Deploy to a GCP VM](#deploy-to-a-gcp-vm-without-docker-bare-binary).
+
+### 4. Wire up Telegram and enable a chat
+
+Open <http://127.0.0.1:8765> and log in with `webui_password` (tunnel to it if remote —
+see [Web UI](#web-ui)). Then:
+
+1. Set `global_admin_user_ids` to your own Telegram user id.
+2. DM the bot, or @mention it in a group. It replies *"This chat isn't configured yet"* and
+   the chat appears in the dashboard.
+3. Open that chat → set its **persona**, **model**, and **`bot_token`** (must be the bot
+   actually in that chat) → **Enable**.
+
+New chats stay inert until you enable them, so nothing spends your Claude subscription
+until you say so.
 
 ## Telegram bot setup (@BotFather)
 
@@ -148,11 +255,13 @@ firewall / TLS reverse proxy, never raw on the internet.
 
 ## Deploy with Docker (Debian server, ~1 GB RAM)
 
-On a headless server there's no interactive login, so create a long-lived subscription
-token once (on a machine where you're logged in):
+The container has no browser, so `/login` can't run inside it. Mint a long-lived
+subscription token once **on a machine where you're logged in**:
 
 ```sh
-claude setup-token        # prints a token; keep it secret
+npm install -g @anthropic-ai/claude-code
+claude                    # then /login inside the REPL, and /exit
+claude setup-token        # prints the token; keep it secret
 ```
 
 Build and run:
@@ -183,11 +292,18 @@ Lighter than Docker on a 1 GB box: cross-compile the static binary, install the 
 CLI on the VM, and run it under systemd. The VM needs **Node + the `claude` CLI** because
 the app shells out to `claude -p`.
 
-Two auth options on the server:
-- **Already logged in** (`claude` interactively, or `claude setup-token` applied): leave
-  `claude_code_oauth_token` **blank** — the existing `~/.claude` login is used. The service
-  must then run **as that same user** with `HOME` pointing at their home dir.
-- **Token**: set `CLAUDE_CODE_OAUTH_TOKEN` (env or `secrets.yaml`).
+Two auth options on the server — a headless VM has no browser, so you cannot complete
+`/login` there directly:
+
+- **Token (usual choice).** On your laptop, run `claude` → `/login` → then
+  `claude setup-token` to mint a long-lived token. Set it on the VM as
+  `CLAUDE_CODE_OAUTH_TOKEN` (env) or `claude_code_oauth_token` (`secrets.yaml`).
+- **Logged in on the VM itself.** If you managed to complete `/login` there (e.g. over a
+  forwarded browser) leave `claude_code_oauth_token` **blank** — the existing `~/.claude`
+  login is used. The service must then run **as that same user**, with `HOME` pointing at
+  their home dir.
+
+Verify on the VM with `echo hi | claude -p` before starting the service.
 
 > Setting `claude_code_oauth_token` to a stale/placeholder value **overrides** a working
 > login and makes every reply fail with an auth error. Blank it unless it's a real token.
@@ -198,9 +314,14 @@ GCP VMs are amd64 unless you chose the T2A (Arm) family — check `uname -m` on 
 (`x86_64` → amd64, `aarch64` → arm64):
 
 ```sh
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o assistant-linux ./cmd/assistant
-gcloud compute scp assistant-linux VM_NAME:~/ --zone=YOUR_ZONE
+./build.sh                  # or: GOARCH=arm64 ./build.sh
+gcloud compute scp assistant-linux.tar.gz VM_NAME:~/ --zone=YOUR_ZONE
 ```
+
+`build.sh` wraps the static build (`CGO_ENABLED=0 go build -trimpath -ldflags="-s -w"`,
+matching the Dockerfile) and packages the result as `assistant-linux.tar.gz` with the exec
+bit forced to 0755 — so it also works when you build from Windows. See
+[step 1 of the Quickstart](#1-build) for the full breakdown.
 
 ### 2. Prepare the VM (`gcloud compute ssh VM_NAME --zone=YOUR_ZONE`)
 
@@ -217,6 +338,7 @@ sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
 sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
+tar -xzf ~/assistant-linux.tar.gz -C ~
 sudo mv ~/assistant-linux /usr/local/bin/assistant && sudo chmod +x /usr/local/bin/assistant
 ```
 
