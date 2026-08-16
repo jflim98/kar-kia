@@ -86,7 +86,7 @@ func TestGlobalSecretsWriteOnlyAndHotApply(t *testing.T) {
 		t.Fatalf("expected webui_password_set true:\n%s", w.Body.String())
 	}
 
-	patch := `{"default_model":"opus","global_admin_user_ids":[42],"bot_tokens":["t1","t2"]}`
+	patch := `{"default_model":"opus","global_admin_user_ids":[42],"blacklisted_user_ids":[9],"bot_tokens":["t1","t2"]}`
 	r2 := httptest.NewRequest(http.MethodPatch, "/admin/api/global", strings.NewReader(patch))
 	r2.AddCookie(c)
 	w2 := httptest.NewRecorder()
@@ -94,7 +94,7 @@ func TestGlobalSecretsWriteOnlyAndHotApply(t *testing.T) {
 	if w2.Code != http.StatusOK {
 		t.Fatalf("patch failed: %d %s", w2.Code, w2.Body.String())
 	}
-	if cfg.Get().DefaultModel != "opus" || !cfg.Get().IsGlobalAdmin(42) {
+	if cfg.Get().DefaultModel != "opus" || !cfg.Get().IsGlobalAdmin(42) || !cfg.Get().IsBlacklisted(9) {
 		t.Fatalf("global patch not applied: %+v", cfg.Get())
 	}
 	if len(cfg.Secrets().BotTokens) != 2 {
@@ -143,7 +143,7 @@ func TestChatConfigRoundTrip(t *testing.T) {
 	s, _, chats := testServer(t)
 	c := login(t, s, "secret")
 
-	patch := `{"config":{"enabled":false,"model":"haiku","admin_user_ids":[5],"group_response_mode":"all",` +
+	patch := `{"config":{"enabled":false,"model":"haiku","admin_user_ids":[5],"blacklisted_user_ids":[13],"group_response_mode":"all",` +
 		`"all_allowed_tools":["memory","weather"],"admin_allowed_tools":["reminders"]},"persona":"You are Nova."}`
 	r := httptest.NewRequest(http.MethodPatch, "/admin/api/chats/123", strings.NewReader(patch))
 	r.SetPathValue("id", "123")
@@ -158,6 +158,9 @@ func TestChatConfigRoundTrip(t *testing.T) {
 	cfg, ok := chats.LoadChatConfig(123)
 	if !ok || cfg.Model != "haiku" || cfg.GroupResponseMode != "all" || len(cfg.AdminUserIDs) != 1 {
 		t.Fatalf("chat config not persisted: %+v ok=%v", cfg, ok)
+	}
+	if len(cfg.BlacklistedUserIDs) != 1 || cfg.BlacklistedUserIDs[0] != 13 {
+		t.Fatalf("chat blacklist not persisted: %v", cfg.BlacklistedUserIDs)
 	}
 	if len(cfg.AllAllowedTools) != 2 || cfg.AllAllowedTools[1] != "weather" || len(cfg.AdminAllowedTools) != 1 {
 		t.Fatalf("allow-lists not persisted: all=%v admin=%v", cfg.AllAllowedTools, cfg.AdminAllowedTools)

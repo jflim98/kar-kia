@@ -61,12 +61,22 @@ func (f *fakeChats) ToolAllowed(chatID, userID int64, server string) bool {
 		return false
 	}
 	switch server {
-	case "memory":
+	case "memory", "moderation":
 		return true
 	case "reminders":
 		return userID == 7
 	}
 	return false
+}
+
+type fakeBlacklister struct {
+	gotChat, gotTarget int64
+	gotReason          string
+}
+
+func (f *fakeBlacklister) Blacklist(chatID, targetID int64, reason string) (string, error) {
+	f.gotChat, f.gotTarget, f.gotReason = chatID, targetID, reason
+	return "blacklisted", nil
 }
 
 type fakeSink struct{ called bool }
@@ -115,7 +125,7 @@ func newServer(t *testing.T) (*Server, *fakeChats, *fakeSink, *fakeRecall) {
 	fc := &fakeChats{sched: sched}
 	fs := &fakeSink{}
 	fr := &fakeRecall{}
-	return New(fc, fs, fr, fc), fc, fs, fr
+	return New(fc, fs, fr, fc, &fakeBlacklister{}), fc, fs, fr
 }
 
 func TestScheduleRequiresAdmin(t *testing.T) {
@@ -159,6 +169,41 @@ func TestProposeRoutes(t *testing.T) {
 	}))
 	if res.IsError || !sink.called {
 		t.Fatalf("save should route to the sink: %s", resultText(t, res))
+	}
+}
+
+func TestBlacklistRoutesAndValidates(t *testing.T) {
+	s, _, _, _ := newServer(t)
+	bl := s.bl.(*fakeBlacklister)
+
+	// Missing reason -> error, nothing routed.
+	res, _ := s.handleBlacklist(context.Background(), call("blacklist_user", map[string]any{
+		"chat_id": float64(100), "user_id": float64(9), "target_user_id": float64(42),
+	}))
+	if !res.IsError {
+		t.Fatalf("blacklist without reason should error: %s", resultText(t, res))
+	}
+	if bl.gotTarget != 0 {
+		t.Fatal("nothing should be routed on a validation error")
+	}
+
+	// Moderation not enabled in an unknown chat -> gate rejects.
+	res, _ = s.handleBlacklist(context.Background(), call("blacklist_user", map[string]any{
+		"chat_id": float64(200), "user_id": float64(9), "target_user_id": float64(42), "reason": "spam",
+	}))
+	if !res.IsError || !strings.Contains(resultText(t, res), "not enabled") {
+		t.Fatalf("inactive chat should be gate-rejected: %s", resultText(t, res))
+	}
+
+	// A valid call routes chat, target, and reason through.
+	res, _ = s.handleBlacklist(context.Background(), call("blacklist_user", map[string]any{
+		"chat_id": float64(100), "user_id": float64(9), "target_user_id": float64(42), "reason": "spam",
+	}))
+	if res.IsError || resultText(t, res) != "blacklisted" {
+		t.Fatalf("blacklist should route: %s", resultText(t, res))
+	}
+	if bl.gotChat != 100 || bl.gotTarget != 42 || bl.gotReason != "spam" {
+		t.Fatalf("blacklister got wrong args: %+v", bl)
 	}
 }
 

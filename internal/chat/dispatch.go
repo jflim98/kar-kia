@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"slices"
 
 	"assistant/internal/config"
 	"assistant/internal/telegram"
@@ -23,6 +24,13 @@ func (m *Manager) SetProposals(r CallbackRouter) { m.proposals = r }
 // configuration/token, and either replies (configured) or sends the canned
 // "unconfigured" notice (directed messages only). No LLM/memory for unconfigured chats.
 func (m *Manager) OnMessage(ctx context.Context, s telegram.Sender, token string, msg telegram.Message) {
+	// Globally blacklisted senders are dropped before anything else — no registry entry,
+	// no memory recording, no canned reply, and nothing ever reaches claude. This applies
+	// even in unconfigured chats.
+	if m.global.Get().IsBlacklisted(msg.UserID) {
+		return
+	}
+
 	m.registry.observe(msg.ChatID, msg.ChatName, msg.ChatType, token)
 
 	t, ok := m.get(msg.ChatID)
@@ -36,6 +44,11 @@ func (m *Manager) OnMessage(ctx context.Context, s telegram.Sender, token string
 	// A configured chat is served only by its designated token (a group may host several
 	// of your bots — the others ignore it here, preventing double replies).
 	if t.cfg.BotToken != "" && t.cfg.BotToken != token {
+		return
+	}
+	// Locally blacklisted senders are likewise dropped silently: not recorded, not replied
+	// to, never sent to claude.
+	if slices.Contains(t.cfg.BlacklistedUserIDs, msg.UserID) {
 		return
 	}
 

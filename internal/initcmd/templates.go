@@ -9,6 +9,7 @@ concurrency: 1                # max concurrent 'claude -p' across ALL chats (1GB
 max_budget_usd: 0             # per-call spend cap (0 = disabled)
 
 global_admin_user_ids: []     # operators: implicitly cron-admins in every chat
+blacklisted_user_ids: []      # telegram user ids ignored in ALL chats (per-chat lists live in chat.yaml)
 
 # Defaults applied to each new chat (overridable per-chat in the dashboard):
 default_model: sonnet
@@ -32,7 +33,7 @@ bot_tokens: []                # bot tokens the daemon connects (one long-poll ea
 
 const mcpServersTemplate = `# Registered external MCP servers (local stdio only). Managed via the web UI; env may hold
 # secrets, so this file is mode 0600. Each chat enables a subset via its all_allowed_tools /
-# admin_allowed_tools lists. The built-in "memory" and "reminders" servers are always available
+# admin_allowed_tools lists. The built-in "memory", "reminders" and "moderation" servers are always available
 # and need no entry here. Example:
 #
 # - name: everything

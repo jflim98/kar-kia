@@ -16,13 +16,14 @@ func TestConsolidationSpec(t *testing.T) {
 			t.Fatalf("id %d: not deterministic: %q vs %q", id, spec, again)
 		}
 
-		// Shape: "<minute> 3 * * *" with minute in [0,10] (the 03:00 hour + jitter).
+		// Shape: "<minute> 7 * * *" with minute in [2,12] (the 07:00 hour + jitter, starting
+		// at :02 so the 07:01 session prune stays ahead of every chat).
 		fields := strings.Fields(spec)
-		if len(fields) != 5 || fields[1] != "3" || fields[2] != "*" || fields[3] != "*" || fields[4] != "*" {
+		if len(fields) != 5 || fields[1] != "7" || fields[2] != "*" || fields[3] != "*" || fields[4] != "*" {
 			t.Fatalf("id %d: unexpected spec %q", id, spec)
 		}
 		min, err := strconv.Atoi(fields[0])
-		if err != nil || min < 0 || min > 10 {
+		if err != nil || min < 2 || min > 12 {
 			t.Fatalf("id %d: minute out of range in %q", id, spec)
 		}
 	}

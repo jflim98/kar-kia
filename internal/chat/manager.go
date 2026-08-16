@@ -120,14 +120,15 @@ func (m *Manager) Start(ctx context.Context) error {
 	return nil
 }
 
-// consolidationSpec returns a ~03:00 cron spec with a per-chat minute offset (0–10) derived
-// from the chat ID, so chats consolidate at slightly staggered times instead of all colliding
-// at once. Deterministic (FNV hash of the decimal ID, which handles the negative IDs Telegram
-// uses for groups) for a stable, even spread across restarts.
+// consolidationSpec returns a 07:02–07:12 cron spec with a per-chat minute offset derived from
+// the chat ID, so chats consolidate at slightly staggered times instead of all colliding at
+// once. Starts at :02 to leave the 07:01 session prune a clear minute ahead of the first chat.
+// Deterministic (FNV hash of the decimal ID, which handles the negative IDs Telegram uses for
+// groups) for a stable, even spread across restarts.
 func consolidationSpec(id int64) string {
 	h := fnv.New32a()
 	fmt.Fprintf(h, "%d", id)
-	return fmt.Sprintf("%d 3 * * *", h.Sum32()%11)
+	return fmt.Sprintf("%d 7 * * *", 2+h.Sum32()%11)
 }
 
 // activate builds and stores a tenant (caller ensures cfg.Enabled). Not locked.
@@ -181,8 +182,9 @@ func (m *Manager) activate(id int64, cfg config.Chat) error {
 	}
 	sched := schedule.New(schedStore, loc, fire)
 	sched.Start(tctx)
-	// Per-chat nightly jobs. Consolidation compacts the day's memory, then rolls the session
-	// over so the next message starts fresh with the just-written daily note in its prefix.
+	// Per-chat early-morning jobs. Consolidation compacts the day's memory, then rolls the
+	// session over so the next message starts fresh with the just-written daily note in its
+	// prefix. The session prune runs first, at 07:01.
 	_ = sched.AddBuiltin(consolidationSpec(id), func() {
 		if err := consolidate.Run(tctx, mem, br, resolved.MemoryRetentionDays, resolved.RawRetentionDays, mem.Now()); err != nil {
 			log.Printf("chat %d: consolidation failed: %v", id, err)
@@ -194,7 +196,7 @@ func (m *Manager) activate(id int64, cfg config.Chat) error {
 			log.Printf("chat %d: consolidated, session rolled over", id)
 		}
 	})
-	_ = sched.AddBuiltin("20 1 * * *", func() {
+	_ = sched.AddBuiltin("1 7 * * *", func() {
 		if n, err := sess.PruneOlderThan(time.Duration(resolved.SessionTTLDays) * 24 * time.Hour); err == nil && n > 0 {
 			log.Printf("chat %d: pruned %d idle sessions", id, n)
 		}
@@ -323,6 +325,39 @@ func (m *Manager) ToolAllowed(chatID, modelUserID int64, server string) bool {
 		return m.IsCronAdmin(chatID, m.speakerFor(chatID))
 	}
 	return false
+}
+
+// Blacklist adds a Telegram user to a chat's LOCAL blacklist (backs the moderation MCP
+// tool). Once listed, the dispatcher drops that user's messages before they reach claude.
+// Refuses to blacklist admins or the DM owner so the assistant can never lock out the
+// people who could undo it; removal is dashboard-only.
+func (m *Manager) Blacklist(chatID, targetID int64, reason string) (string, error) {
+	t, ok := m.get(chatID)
+	if !ok {
+		return "", fmt.Errorf("this chat is not active")
+	}
+	if targetID == 0 {
+		return "", fmt.Errorf("a valid target user id is required")
+	}
+	g := m.global.Get()
+	if targetID == chatID || g.IsGlobalAdmin(targetID) || t.cfg.IsCronAdmin(g, targetID) {
+		return "", fmt.Errorf("user %d is an admin of this chat and cannot be blacklisted", targetID)
+	}
+	// Re-read from disk so a concurrent dashboard edit isn't clobbered, then persist and
+	// reload the tenant (SaveChatConfig) so the block takes effect immediately.
+	cfg, ok := m.LoadChatConfig(chatID)
+	if !ok {
+		return "", fmt.Errorf("this chat is not configured")
+	}
+	if slices.Contains(cfg.BlacklistedUserIDs, targetID) {
+		return fmt.Sprintf("User %d is already blacklisted in this chat.", targetID), nil
+	}
+	cfg.BlacklistedUserIDs = append(cfg.BlacklistedUserIDs, targetID)
+	if err := m.SaveChatConfig(chatID, cfg); err != nil {
+		return "", err
+	}
+	log.Printf("chat %d: blacklisted user %d (reason: %s)", chatID, targetID, reason)
+	return fmt.Sprintf("User %d is now blacklisted in this chat; their messages will be ignored. An admin can undo this in the dashboard.", targetID), nil
 }
 
 // RegenerateMCPConfigs rewrites every active chat's mcp.json. Called after the external MCP

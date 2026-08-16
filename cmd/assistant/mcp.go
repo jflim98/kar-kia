@@ -102,7 +102,7 @@ func cmdMCPList(args []string) {
 	_ = fs.Parse(args)
 	_, servers := loadRegistry(absDir(*dir))
 	if len(servers) == 0 {
-		fmt.Println("No external MCP servers registered. (Built-in 'memory' and 'reminders' are always available.)")
+		fmt.Println("No external MCP servers registered. (Built-in 'memory', 'reminders' and 'moderation' are always available.)")
 		return
 	}
 	for _, s := range servers {

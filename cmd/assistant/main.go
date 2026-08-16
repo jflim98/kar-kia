@@ -155,7 +155,7 @@ func cmdRun(args []string) {
 	)
 	chatMgr.SetProposals(pm)
 
-	mcpSrv := mcpserver.New(chatMgr, pm, chatMgr, chatMgr)
+	mcpSrv := mcpserver.New(chatMgr, pm, chatMgr, chatMgr, chatMgr)
 	web := webui.New(cfgMgr, chatMgr)
 
 	if err := chatMgr.Start(ctx); err != nil {

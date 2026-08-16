@@ -37,14 +37,16 @@ func IsValidEffort(s string) bool { return slices.Contains(EffortLevels, s) }
 // is the single source of truth shared by the MCP server (which paths to serve) and the
 // per-chat mcp.json generator (which URLs to emit).
 const (
-	ServerMemory    = "memory"
-	ServerReminders = "reminders"
+	ServerMemory     = "memory"
+	ServerReminders  = "reminders"
+	ServerModeration = "moderation"
 )
 
 // BuiltinMCPServers maps a built-in server name to its path on the daemon MCP endpoint.
 var BuiltinMCPServers = map[string]string{
-	ServerMemory:    "/mcp/memory",
-	ServerReminders: "/mcp/reminders",
+	ServerMemory:     "/mcp/memory",
+	ServerReminders:  "/mcp/reminders",
+	ServerModeration: "/mcp/moderation",
 }
 
 // IsBuiltinServer reports whether name is one of the daemon's built-in MCP servers.
@@ -57,8 +59,9 @@ func IsBuiltinServer(name string) bool {
 // per-speaker "tools you may use" line. Every key in BuiltinMCPServers MUST have an entry here
 // (enforced by a test) so a new built-in server can't be added without describing it.
 var serverDescriptions = map[string]string{
-	ServerMemory:    "recall and save facts",
-	ServerReminders: "schedule, list, and cancel reminders",
+	ServerMemory:     "recall and save facts",
+	ServerReminders:  "schedule, list, and cancel reminders",
+	ServerModeration: "blacklist persistently abusive users from this chat, at your own judgment only",
 }
 
 // ServerDescription returns a short label for a server, or "" if none (external servers, which
@@ -83,6 +86,11 @@ type Global struct {
 
 	// GlobalAdminUserIDs are operators: implicitly cron-admins in every chat.
 	GlobalAdminUserIDs []int64 `yaml:"global_admin_user_ids" json:"global_admin_user_ids"`
+
+	// BlacklistedUserIDs (Telegram user ids) are dropped at the gateway edge in EVERY chat:
+	// their messages are never recorded and never reach claude. Per-chat blacklists live in
+	// chat.yaml (Chat.BlacklistedUserIDs).
+	BlacklistedUserIDs []int64 `yaml:"blacklisted_user_ids" json:"blacklisted_user_ids"`
 
 	// Defaults applied when a new chat is created / a chat field is empty.
 	DefaultModel               string `yaml:"default_model" json:"default_model"`
@@ -114,6 +122,11 @@ func (g Global) IsGlobalAdmin(userID int64) bool {
 	return slices.Contains(g.GlobalAdminUserIDs, userID)
 }
 
+// IsBlacklisted reports whether a user is on the global blacklist (all chats).
+func (g Global) IsBlacklisted(userID int64) bool {
+	return slices.Contains(g.BlacklistedUserIDs, userID)
+}
+
 // DefaultGlobal returns the global config with sensible defaults.
 func DefaultGlobal() Global {
 	return Global{
@@ -127,7 +140,7 @@ func DefaultGlobal() Global {
 		DefaultRawRetentionDays:    14,
 		DefaultSessionTTLDays:      2,
 		DefaultRotateTurnCap:       50,
-		DefaultAllAllowedTools:     []string{ServerMemory},
+		DefaultAllAllowedTools:     []string{ServerMemory, ServerModeration},
 		DefaultAdminAllowedTools:   []string{ServerReminders},
 	}
 }
