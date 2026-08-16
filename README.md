@@ -173,26 +173,76 @@ sudo mv assistant-linux /usr/local/bin/assistant
 ./assistant init --data-dir ./data
 ```
 
-That writes three global files into the data dir. **You only need to edit the first one to
-get running** — the rest have working defaults:
+That writes three global files into the data dir. **Only `secrets.yaml` must be edited to
+get running** — the other two have working defaults:
 
-| file | mode | what to set |
-| --- | --- | --- |
-| `secrets.yaml` | 0600 | **`webui_password`** (admin UI login) and **`bot_tokens`** (from @BotFather). On a headless server also `claude_code_oauth_token` — otherwise leave it **commented out**. |
-| `config.yaml` | 0644 | Optional. `global_admin_user_ids`, `concurrency` (keep at 1–2 on a 1 GB box), `default_model`, `default_tz`. |
-| `mcp_servers.yaml` | 0600 | Optional. External MCP servers; starts empty, managed from the web UI. |
+| file | mode | required? | what it holds |
+| --- | --- | --- | --- |
+| `secrets.yaml` | 0600 | **yes** | web UI password, Telegram bot tokens, optional Claude token |
+| `config.yaml` | 0644 | no | admins, concurrency, per-chat defaults |
+| `mcp_servers.yaml` | 0600 | no | external MCP servers; starts empty, managed from the web UI |
 
-A minimal `secrets.yaml` for local use:
+#### `secrets.yaml` — the only file you must edit
+
+> All values below are **made-up examples**. Substitute your own; never commit this file
+> (it's already in `.gitignore`, and `init` writes it 0600).
 
 ```yaml
-webui_password: "choose-a-strong-one"
-bot_tokens: ["123456:ABC-DEF..."]
-# claude_code_oauth_token: ""   # leave commented locally — your /login is used
+# Password you'll type to log in to the admin web UI. Any string — pick a long random one.
+webui_password: "hunter2-but-actually-long-and-random"
+
+# One entry per bot from @BotFather. Format is <bot_id>:<35-char secret>.
+# The daemon opens one long-poll per token, so only list bots you actually use.
+bot_tokens:
+  - "8123456789:AAHk9pQr2sVwXyZExampleTokenNotReal01234"
+  - "7987654321:AAGz1mNb3cXvBnMExampleSecondBotFake5678"
+
+# Leave this COMMENTED OUT on your laptop — `claude -p` uses your /login from step 0.
+# Uncomment ONLY on a headless server, with a real token from `claude setup-token`:
+# claude_code_oauth_token: "sk-ant-oat01-EXAMPLE-NOT-A-REAL-TOKEN"
+```
+
+Where each value comes from:
+
+| field | how to get it |
+| --- | --- |
+| `webui_password` | You invent it. Generate one with `openssl rand -base64 24` (or `python3 -c "import secrets;print(secrets.token_urlsafe(24))"`). |
+| `bot_tokens` | Telegram → [@BotFather](https://t.me/BotFather) → `/newbot` → it prints the token. `/token` re-issues one for an existing bot. |
+| `claude_code_oauth_token` | `claude setup-token` on a machine where you've run `/login`. **Server only.** |
+
+Single-line list syntax works too, if you prefer it:
+
+```yaml
+bot_tokens: ["8123456789:AAHk9pQr2sVwXyZExampleTokenNotReal01234"]
 ```
 
 > ⚠️ Setting `claude_code_oauth_token` to a stale or placeholder value **overrides** a
 > working `/login` and makes every reply fail with an auth error. Leave it commented unless
-> it holds a real token from `claude setup-token`.
+> it holds a real token. Copying the literal example above will break auth.
+
+Instead of editing the file, you can supply the same three values as env vars at startup —
+they're merged in on each start and override the file:
+
+```sh
+export WEBUI_PASSWORD='hunter2-but-actually-long-and-random'
+export BOT_TOKENS='8123456789:AAHk...,7987654321:AAGz...'   # comma-separated
+export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-...'           # server only
+```
+
+#### `config.yaml` — optional, but set your admin id
+
+Everything here has a default. The one worth setting early is `global_admin_user_ids`, which
+makes you a cron-admin in every chat:
+
+```yaml
+global_admin_user_ids: [123456789]   # your numeric Telegram user id (example value)
+concurrency: 1                       # keep at 1–2 on a 1 GB box
+default_model: sonnet
+default_tz: Asia/Singapore
+```
+
+Find your numeric id by messaging [@userinfobot](https://t.me/userinfobot) on Telegram — it
+replies with it. It's a plain number, not your `@username`.
 
 Per-chat settings (persona, model, tools, cron-admins) are **not** files you hand-edit —
 they're created for you when a chat first appears, and edited in the web UI (step 4).
@@ -270,17 +320,22 @@ Build and run:
 docker build -t assistant .
 docker volume create assistant-data
 
+# All three values below are made-up examples — substitute your own.
 docker run -d --name assistant --restart unless-stopped \
   -v assistant-data:/data \
-  -e BOT_TOKENS=123:abc,456:def \
-  -e WEBUI_PASSWORD=choose-a-strong-one \
-  -e CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-... \
+  -e BOT_TOKENS='8123456789:AAHk9pQr2sVwXyZExampleTokenNotReal01234,7987654321:AAGz1mNb3cXvBnMExampleSecondBotFake5678' \
+  -e WEBUI_PASSWORD='hunter2-but-actually-long-and-random' \
+  -e CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-EXAMPLE-NOT-A-REAL-TOKEN' \
   assistant
 ```
 
 `BOT_TOKENS` is comma-separated (merged into `bot_tokens`). On first run it auto-scaffolds
 `/data`; then configure chats from the web UI. Env vars override the matching secrets each
-start.
+start — see [`secrets.yaml`](#secretsyaml--the-only-file-you-must-edit) for where each value
+comes from.
+
+Quote the values in your shell: bot tokens and OAuth tokens contain characters (`-`, `_`)
+that are fine unquoted, but a generated password may not be.
 
 **RAM note:** each reply spawns a `claude -p` (Node) process, the heavy memory user.
 `concurrency` defaults to **1** — keep it at 1–2 on a 1 GB box. Passive group logging
